@@ -41,6 +41,7 @@ from exo.worker.engines.mlx.generator.generate import (
     prefill,
 )
 from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
+from exo.worker.engines.mlx.memory import log_generation_memory
 from exo.worker.engines.mlx.patches.opt_batch_gen import (
     set_needs_topk,
     take_ready_topk,
@@ -130,6 +131,11 @@ class ExoBatchGenerator:
         all_prompt_tokens = fix_unmatched_think_end_tokens(
             all_prompt_tokens, self.tokenizer
         )
+        log_generation_memory(
+            "batch_encoded_prompt",
+            task_params,
+            prompt_tokens=len(all_prompt_tokens),
+        )
 
         vision: VisionResult | None = None
         media_regions: list[MediaRegion] = []
@@ -178,6 +184,17 @@ class ExoBatchGenerator:
                 prompt_tokens = remaining_tokens
         else:
             cache = make_kv_cache(self.model)
+        prefix_cache_hit: Literal["none", "partial", "exact"] = "none"
+        if matched_index is not None and prefix_hit_length > 0:
+            prefix_cache_hit = "exact" if is_exact_hit else "partial"
+        log_generation_memory(
+            "batch_prefix_cache_checked",
+            task_params,
+            prompt_tokens=len(all_prompt_tokens),
+            uncached_prompt_tokens=len(prompt_tokens),
+            prefix_hit_length=prefix_hit_length,
+            prefix_cache_hit=prefix_cache_hit,
+        )
 
         seed = task_params.seed if task_params.seed is not None else 42
         mx.random.seed(seed)
@@ -215,6 +232,14 @@ class ExoBatchGenerator:
         with vision_ctx:
             if use_remote and task_params.prefill_endpoint is not None:
                 try:
+                    log_generation_memory(
+                        "batch_remote_prefill_start",
+                        task_params,
+                        prompt_tokens=len(all_prompt_tokens),
+                        uncached_prompt_tokens=len(prompt_tokens),
+                        prefix_hit_length=prefix_hit_length,
+                        prefix_cache_hit=prefix_cache_hit,
+                    )
                     _prefill_tps, _prefill_tokens, cache_snapshots = remote_prefill(
                         prompt_tokens[:-1],
                         cache,
@@ -231,6 +256,14 @@ class ExoBatchGenerator:
                     )
 
             if not remote_prefilled:
+                log_generation_memory(
+                    "batch_prefill_start",
+                    task_params,
+                    prompt_tokens=len(all_prompt_tokens),
+                    uncached_prompt_tokens=len(prompt_tokens),
+                    prefix_hit_length=prefix_hit_length,
+                    prefix_cache_hit=prefix_cache_hit,
+                )
                 _prefill_tps, _prefill_tokens, cache_snapshots = prefill(
                     self.model,
                     self.tokenizer,
@@ -241,8 +274,15 @@ class ExoBatchGenerator:
                     on_prefill_progress,
                     distributed_prompt_progress_callback,
                 )
+        log_generation_memory(
+            "batch_prefill_done",
+            task_params,
+            prompt_tokens=len(all_prompt_tokens),
+            uncached_prompt_tokens=len(prompt_tokens),
+            prefix_hit_length=prefix_hit_length,
+            prefix_cache_hit=prefix_cache_hit,
+        )
 
-        prefix_cache_hit: Literal["none", "partial", "exact"] = "none"
         if matched_index is not None and prefix_hit_length > 0:
             assert self.kv_prefix_cache is not None
             if is_exact_hit:
@@ -277,6 +317,14 @@ class ExoBatchGenerator:
                 min_prefix_hit_length,
                 media_regions,
                 prefill_tps=_prefill_tps,
+            )
+            log_generation_memory(
+                "batch_prefix_cache_saved",
+                task_params,
+                prompt_tokens=len(all_prompt_tokens),
+                uncached_prompt_tokens=len(prompt_tokens),
+                prefix_hit_length=prefix_hit_length,
+                prefix_cache_hit=prefix_cache_hit,
             )
 
         last_tokens = prompt_tokens[-2:]
@@ -444,6 +492,13 @@ class ExoBatchGenerator:
                     completion_tokens_details=CompletionTokensDetails(
                         reasoning_tokens=0
                     ),
+                )
+                log_generation_memory(
+                    "batch_decode_done",
+                    state.task_params,
+                    prompt_tokens=len(state.all_prompt_tokens),
+                    prefix_hit_length=state.prefix_hit_length,
+                    prefix_cache_hit=state.prefix_cache_hit,
                 )
 
             results.append(

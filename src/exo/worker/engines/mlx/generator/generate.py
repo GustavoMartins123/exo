@@ -56,6 +56,7 @@ from exo.worker.engines.mlx.constants import (
     MAX_TOKENS,
 )
 from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
+from exo.worker.engines.mlx.memory import log_generation_memory
 from exo.worker.engines.mlx.types import KVCacheType, Model
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
@@ -551,6 +552,11 @@ def mlx_generate(
     all_prompt_tokens = encode_prompt(tokenizer, prompt)
     all_prompt_tokens = fix_unmatched_think_end_tokens(all_prompt_tokens, tokenizer)
     min_prefix_hit_length = max(1000, system_prompt_token_count(task, tokenizer))
+    log_generation_memory(
+        "encoded_prompt",
+        task,
+        prompt_tokens=len(all_prompt_tokens),
+    )
 
     vision: VisionResult | None = None
     if vision_processor is not None:
@@ -595,6 +601,17 @@ def mlx_generate(
             logger.info(
                 f"KV cache hit: {prefix_hit_length}/{len(all_prompt_tokens)} tokens cached ({100 * prefix_hit_length / len(all_prompt_tokens):.1f}%)"
             )
+    prefix_cache_hit = "none"
+    if matched_index is not None and prefix_hit_length > 0:
+        prefix_cache_hit = "exact" if is_exact_hit else "partial"
+    log_generation_memory(
+        "prefix_cache_checked",
+        task,
+        prompt_tokens=len(all_prompt_tokens),
+        uncached_prompt_tokens=len(prompt_tokens),
+        prefix_hit_length=prefix_hit_length,
+        prefix_cache_hit=prefix_cache_hit,
+    )
 
     logits_processors: list[Callable[[mx.array, mx.array], mx.array]] = (
         make_logits_processors(
@@ -648,6 +665,14 @@ def mlx_generate(
     with maybe_vision_ctx:
         if use_remote and task.prefill_endpoint is not None:
             try:
+                log_generation_memory(
+                    "remote_prefill_start",
+                    task,
+                    prompt_tokens=len(all_prompt_tokens),
+                    uncached_prompt_tokens=len(prompt_tokens),
+                    prefix_hit_length=prefix_hit_length,
+                    prefix_cache_hit=prefix_cache_hit,
+                )
                 prefill_tps, prefill_tokens, ssm_snapshots_list = remote_prefill(
                     prompt_tokens[:-1],
                     caches,
@@ -663,6 +688,14 @@ def mlx_generate(
                     "Remote prefill failed, falling back to local prefill"
                 )
         if not remote_prefilled:
+            log_generation_memory(
+                "prefill_start",
+                task,
+                prompt_tokens=len(all_prompt_tokens),
+                uncached_prompt_tokens=len(prompt_tokens),
+                prefix_hit_length=prefix_hit_length,
+                prefix_cache_hit=prefix_cache_hit,
+            )
             prefill_tps, prefill_tokens, ssm_snapshots_list = prefill(
                 model,
                 tokenizer,
@@ -673,6 +706,14 @@ def mlx_generate(
                 on_prefill_progress,
                 distributed_prompt_progress_callback,
             )
+    log_generation_memory(
+        "prefill_done",
+        task,
+        prompt_tokens=len(all_prompt_tokens),
+        uncached_prompt_tokens=len(prompt_tokens),
+        prefix_hit_length=prefix_hit_length,
+        prefix_cache_hit=prefix_cache_hit,
+    )
     cache_snapshots: list[CacheSnapshot] | None = ssm_snapshots_list or None
 
     if kv_prefix_cache is not None and matched_index is not None and is_exact_hit:
@@ -705,6 +746,14 @@ def mlx_generate(
                 media_regions=media_regions,
                 prefill_tps=prefill_tps,
             )
+        log_generation_memory(
+            "prefix_cache_saved",
+            task,
+            prompt_tokens=len(all_prompt_tokens),
+            uncached_prompt_tokens=len(prompt_tokens),
+            prefix_hit_length=prefix_hit_length,
+            prefix_cache_hit=prefix_cache_hit,
+        )
 
     # stream_generate starts from the last token
     last_token = prompt_tokens[-2:]
@@ -804,6 +853,14 @@ def mlx_generate(
                 f"Generation complete: prefill {prompt_tokens} tokens @ "
                 f"{prefill_tps:.1f} tok/s, generated {generated_tokens} tokens @ "
                 f"{generation_tps:.1f} tok/s"
+            )
+            log_generation_memory(
+                "decode_done",
+                task,
+                prompt_tokens=len(all_prompt_tokens),
+                uncached_prompt_tokens=len(prompt_tokens),
+                prefix_hit_length=prefix_hit_length,
+                prefix_cache_hit=prefix_cache_hit,
             )
         if on_generation_token is not None:
             on_generation_token()

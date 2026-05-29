@@ -36,6 +36,7 @@ from exo.worker.engines.mlx.generator.generate import (
     mlx_generate,
     warmup_inference,
 )
+from exo.worker.engines.mlx.memory import clear_mlx_memory, is_recoverable_mlx_oom
 from exo.worker.engines.mlx.types import Model
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
@@ -165,11 +166,18 @@ class SequentialGenerator(Engine):
     ) -> Iterator[
         tuple[TaskId, GenerationChunk | FinishedResponse | CancelledResponse]
     ]:
+        output: list[
+            tuple[TaskId, GenerationChunk | CancelledResponse | FinishedResponse]
+        ] = []
+
         if self._active is None:
             self.agree_on_tasks()
 
             if self._queue:
-                self._start_next()
+                failed_task_id = self._start_next()
+                if failed_task_id is not None:
+                    output.append((failed_task_id, FinishedResponse()))
+                    return iter(output)
             else:
                 return map(
                     lambda task: (task, CancelledResponse()), self._cancelled_tasks
@@ -178,9 +186,6 @@ class SequentialGenerator(Engine):
         assert self._active is not None
 
         task, gen, queue, output_generator = self._active
-        output: list[
-            tuple[TaskId, GenerationChunk | CancelledResponse | FinishedResponse]
-        ] = []
         try:
             response = next(gen)
             queue.push(response)
@@ -192,12 +197,25 @@ class SequentialGenerator(Engine):
             output.append((task.task_id, FinishedResponse()))
             self._active = None
             if self._queue:
-                self._start_next()
+                if (failed_task_id := self._start_next()) is not None:
+                    output.append((failed_task_id, FinishedResponse()))
 
         except Exception as e:
-            self._send_error(task, e)
-            self._active = None
-            raise
+            if is_recoverable_mlx_oom(e):
+                self._send_error(task, e)
+                clear_mlx_memory(
+                    kv_prefix_cache=self.kv_prefix_cache,
+                    clear_prefix_cache=True,
+                )
+                output.append((task.task_id, FinishedResponse()))
+                self._active = None
+                if self._queue:
+                    if (failed_task_id := self._start_next()) is not None:
+                        output.append((failed_task_id, FinishedResponse()))
+            else:
+                self._send_error(task, e)
+                self._active = None
+                raise
 
         return filter(
             lambda chunk: (
@@ -209,12 +227,18 @@ class SequentialGenerator(Engine):
             ),
         )
 
-    def _start_next(self) -> None:
+    def _start_next(self) -> TaskId | None:
         task = self._queue.popleft()
         try:
             gen = self._build_generator(task)
         except Exception as e:
             self._send_error(task, e)
+            if is_recoverable_mlx_oom(e):
+                clear_mlx_memory(
+                    kv_prefix_cache=self.kv_prefix_cache,
+                    clear_prefix_cache=True,
+                )
+                return task.task_id
             raise
         queue = GeneratorQueue[GenerationResponse]()
 
@@ -233,6 +257,7 @@ class SequentialGenerator(Engine):
                 task.task_params.tools,
             )
         self._active = (task, gen, queue, output_generator)
+        return None
 
     def _send_error(self, task: TextGeneration, e: Exception) -> None:
         if self.device_rank == 0:
@@ -402,6 +427,10 @@ class BatchGenerator(Engine):
     ) -> Iterator[
         tuple[TaskId, GenerationChunk | CancelledResponse | FinishedResponse]
     ]:
+        output: list[
+            tuple[TaskId, GenerationChunk | CancelledResponse | FinishedResponse]
+        ] = []
+
         if not self._queue:
             self.agree_on_tasks()
 
@@ -414,6 +443,13 @@ class BatchGenerator(Engine):
                 continue
             except Exception as e:
                 self._send_error(task, e)
+                if is_recoverable_mlx_oom(e):
+                    clear_mlx_memory(
+                        kv_prefix_cache=self.kv_prefix_cache,
+                        clear_prefix_cache=True,
+                    )
+                    output.append((task.task_id, FinishedResponse()))
+                    continue
                 raise
 
             queue = GeneratorQueue[GenerationResponse]()
@@ -434,13 +470,36 @@ class BatchGenerator(Engine):
             self._active_tasks[uid] = (task, queue, output_generator)
 
         if not self._gen.has_work:
-            return self._apply_cancellations()
+            return filter(
+                lambda chunk: (
+                    not isinstance(chunk[1], GenerationChunk) or self.device_rank == 0
+                ),
+                itertools.chain(output, self._apply_cancellations()),
+            )
 
-        results = self._gen.step()
+        try:
+            results = self._gen.step()
+        except Exception as e:
+            if not is_recoverable_mlx_oom(e):
+                raise
+            for uid, (task, _, _) in list(self._active_tasks.items()):
+                self._send_error(task, e)
+                output.append((task.task_id, FinishedResponse()))
+                self._active_tasks.pop(uid, None)
+            self._gen.close()
+            clear_mlx_memory(
+                kv_prefix_cache=self.kv_prefix_cache,
+                clear_prefix_cache=True,
+            )
+            self._gen = ExoBatchGenerator(
+                model=self.model,
+                tokenizer=self.tokenizer,
+                group=self.group,
+                kv_prefix_cache=self.kv_prefix_cache,
+                vision_processor=self.vision_processor,
+            )
+            results = []
 
-        output: list[
-            tuple[TaskId, GenerationChunk | CancelledResponse | FinishedResponse]
-        ] = []
         for uid, response in results:
             if uid not in self._active_tasks:
                 # should we error here?
