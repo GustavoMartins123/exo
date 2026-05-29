@@ -119,6 +119,9 @@ class SequentialGenerator(Engine):
         | None
     ) = field(default=None, init=False)
 
+    def _clear_request_memory(self) -> None:
+        clear_mlx_memory(kv_prefix_cache=self.kv_prefix_cache)
+
     def warmup(self):
         self.check_for_cancel_every = warmup_inference(
             model=self.model,
@@ -196,9 +199,11 @@ class SequentialGenerator(Engine):
         except (StopIteration, PrefillCancelled):
             output.append((task.task_id, FinishedResponse()))
             self._active = None
+            self._clear_request_memory()
             if self._queue:
                 if (failed_task_id := self._start_next()) is not None:
                     output.append((failed_task_id, FinishedResponse()))
+                    self._clear_request_memory()
 
         except Exception as e:
             if is_recoverable_mlx_oom(e):
@@ -371,6 +376,9 @@ class BatchGenerator(Engine):
         ],
     ] = field(default_factory=dict, init=False)
 
+    def _clear_request_memory(self) -> None:
+        clear_mlx_memory(kv_prefix_cache=self.kv_prefix_cache)
+
     def __post_init__(self) -> None:
         self._gen = ExoBatchGenerator(
             model=self.model,
@@ -440,6 +448,7 @@ class BatchGenerator(Engine):
             try:
                 uid = self._start_task(task)
             except PrefillCancelled:
+                self._clear_request_memory()
                 continue
             except Exception as e:
                 self._send_error(task, e)
@@ -517,6 +526,9 @@ class BatchGenerator(Engine):
                 output.append((task.task_id, FinishedResponse()))
                 del self._active_tasks[uid]
 
+        if any(isinstance(result, FinishedResponse) for _, result in output):
+            self._clear_request_memory()
+
         return filter(
             lambda chunk: (
                 not isinstance(chunk[1], GenerationChunk) or self.device_rank == 0
@@ -543,6 +555,7 @@ class BatchGenerator(Engine):
 
         if uids_to_cancel:
             self._gen.cancel(uids_to_cancel)
+            self._clear_request_memory()
 
         already_cancelled = {tid for tid, _ in results}
         for tid in self._cancelled_tasks:
