@@ -1979,7 +1979,12 @@
   }
 
   async function deleteInstance(instanceId: string) {
-    if (!confirm(`Delete instance ${instanceId.slice(0, 8)}...?`)) return;
+    if (
+      !confirm(
+        `Unload model instance ${instanceId.slice(0, 8)}...? This will stop the running model and release its runners.`,
+      )
+    )
+      return;
 
     // Get the model ID of the instance being deleted before we delete it
     const deletedInstanceModelId = getInstanceModelId(instanceData[instanceId]);
@@ -1992,8 +1997,8 @@
       });
 
       if (!response.ok) {
-        console.error("Failed to delete instance:", response.status);
-        addToast({ type: "error", message: "Failed to delete instance" });
+        console.error("Failed to unload model instance:", response.status);
+        addToast({ type: "error", message: "Failed to unload model" });
       } else if (wasSelected) {
         // If we deleted the currently selected model, switch to another available model
         // Find another instance that isn't the one we just deleted
@@ -2021,7 +2026,7 @@
         }
       }
     } catch (error) {
-      console.error("Error deleting instance:", error);
+      console.error("Error unloading model instance:", error);
     }
   }
 
@@ -5222,10 +5227,15 @@
                           >
                         </div>
                         <button
-                          onclick={() => deleteInstance(id)}
+                          onclick={(event) => {
+                            event.stopPropagation();
+                            deleteInstance(id);
+                          }}
+                          title="Unload model from the cluster"
+                          aria-label={`Unload model ${getInstanceModelId(instance)}`}
                           class="text-xs px-2 py-1 font-mono tracking-wider uppercase border border-red-500/30 text-red-400 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50 transition-all duration-200 cursor-pointer"
                         >
-                          DELETE
+                          UNLOAD
                         </button>
                       </div>
                       <div class="pl-2">
@@ -6357,10 +6367,15 @@
                             >
                           </div>
                           <button
-                            onclick={() => deleteInstance(id)}
+                            onclick={(event) => {
+                              event.stopPropagation();
+                              deleteInstance(id);
+                            }}
+                            title="Unload model from the cluster"
+                            aria-label={`Unload model ${getInstanceModelId(instance)}`}
                             class="text-xs px-2 py-1 font-mono tracking-wider uppercase border border-red-500/30 text-red-400 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50 transition-all duration-200 cursor-pointer"
                           >
-                            DELETE
+                            UNLOAD
                           </button>
                         </div>
                         <div class="pl-2">

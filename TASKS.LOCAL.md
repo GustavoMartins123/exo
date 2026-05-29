@@ -1,0 +1,300 @@
+# TASKS.LOCAL.md
+
+Plano local para adaptar o Exo ao uso real com agentes pesados como Hermes,
+principalmente em GPUs pequenas, sem precisar matar o modelo a cada erro de
+memoria.
+
+## Objetivo
+
+Fazer o Exo degradar de forma controlada quando o contexto, KV cache ou buffers
+temporarios nao couberem em VRAM.
+
+Hoje o comportamento ruim observado e:
+
+- requests pequenos pelo front funcionam;
+- requests de agente, com milhares de tokens de system prompt, estouram VRAM;
+- depois de erro ou chat apagado, a VRAM pode continuar ocupada;
+- o runner/modelo precisa ser morto para recuperar memoria;
+- o cache prefixado existe, mas a pressao usada para eviction parece baseada em
+  RAM do sistema, nao em VRAM CUDA.
+
+## Prioridade 0 - Reproduzir e medir antes de alterar
+
+- [ ] Criar um teste manual fixo com o payload pequeno do front.
+  - Endpoint: `/v1/chat/completions`
+  - Modelo: `mlx-community/Qwen3.6-27B-4bit`
+  - Mensagens: system curto + user `oi`
+  - Confirmar tokens/s, VRAM antes/depois e se duas maquinas participam.
+
+- [ ] Criar um teste manual fixo simulando Hermes.
+  - System prompt com 5k, 10k e 17k tokens.
+  - `max_tokens` pequeno, exemplo `16`.
+  - `enable_thinking=false` e `reasoning_effort=none`.
+  - Medir onde acontece OOM: antes do prefill, durante prefill, durante decode ou
+    ao salvar prefix cache.
+
+- [ ] Adicionar logging de memoria por request.
+  - Arquivos provaveis:
+    - `src/exo/api/main.py`
+    - `src/exo/worker/runner/runner.py`
+    - `src/exo/worker/engines/mlx/generator/generate.py`
+    - `src/exo/worker/engines/mlx/cache.py`
+  - Logar:
+    - prompt tokens;
+    - output max tokens;
+    - prefix cache hit;
+    - `mx.get_active_memory()`, `mx.get_peak_memory()` se disponivel;
+    - memoria CUDA/NVIDIA via NVML quando disponivel;
+    - RAM via `psutil` apenas como dado secundario.
+
+## Prioridade 1 - Nao morrer com OOM
+
+- [ ] Capturar OOM CUDA/MLX em volta de prefill/decode.
+  - Arquivo principal: `src/exo/worker/engines/mlx/generator/generate.py`
+  - Tratar erros contendo:
+    - `cudaMalloc`
+    - `cudaMallocAsync`
+    - `out of memory`
+    - `CUDA`
+  - Ao capturar:
+    - cancelar o request atual;
+    - retornar `ErrorChunk` para a API;
+    - limpar caches temporarios;
+    - manter o runner/modelo carregado se possivel.
+
+- [ ] Criar uma funcao central de limpeza de memoria MLX/CUDA.
+  - Arquivo sugerido: `src/exo/worker/engines/mlx/memory.py`
+  - Deve executar:
+    - `gc.collect()`;
+    - `mx.clear_cache()`;
+    - limpar prefix caches de request se necessario;
+    - sincronizar/eval pendencias antes de medir novamente.
+
+- [ ] Garantir limpeza ao fim de todo request, com sucesso, cancelamento ou erro.
+  - Arquivos provaveis:
+    - `src/exo/worker/runner/runner.py`
+    - `src/exo/worker/runner/llm_inference/batch_generator.py`
+    - `src/exo/worker/engines/mlx/generator/generate.py`
+  - Usar `try/finally` para soltar objetos temporarios do request.
+
+- [ ] Adicionar estado "runner recoverable error".
+  - Hoje o erro tende a matar o runner ou deixar memoria presa.
+  - O runner deve voltar para `RunnerReady` depois de limpar memoria quando o
+    modelo ainda estiver integro.
+
+## Prioridade 2 - Limites reais de contexto e preflight
+
+- [ ] Adicionar limite de prompt por request no tipo de API.
+  - Arquivos:
+    - `src/exo/api/types/api.py`
+    - `src/exo/shared/types/text_generation.py`
+    - `src/exo/api/adapters/chat_completions.py`
+  - Campo sugerido:
+    - `max_prompt_tokens: int | None`
+  - Variavel de ambiente sugerida:
+    - `EXO_MAX_PROMPT_TOKENS`
+
+- [ ] Fazer preflight antes de carregar o prompt na GPU.
+  - Tokenizar primeiro.
+  - Se `prompt_tokens + max_output_tokens` exceder limite configurado:
+    - retornar erro claro;
+    - nao iniciar prefill;
+    - nao alocar KV cache.
+
+- [ ] Implementar truncamento opcional de mensagens.
+  - Campo sugerido:
+    - `truncation: "error" | "drop_oldest" | "summarize_unavailable"`
+  - Inicialmente implementar apenas:
+    - `error`: falha clara;
+    - `drop_oldest`: remove mensagens antigas mantendo system e ultimas N.
+
+- [ ] Definir limites por perfil de hardware.
+  - Exemplo inicial para RTX 3060 12GB:
+    - contexto pratico: 4k a 8k para Qwen 27B/35B;
+    - evitar 64k/262k nesse backend;
+    - `max_tokens` baixo por padrao quando VRAM livre estiver baixa.
+
+## Prioridade 3 - Corrigir eviction do KV prefix cache
+
+- [ ] Trocar a metrica de eviction de RAM para VRAM.
+  - Arquivo principal: `src/exo/worker/engines/mlx/cache.py`
+  - Problema atual:
+    - `_default_memory_threshold()` e `get_memory_used_percentage()` usam
+      `psutil.virtual_memory()`;
+    - isso nao representa a memoria da RTX.
+  - Implementar:
+    - uso de NVML se disponivel;
+    - fallback para `mx.get_active_memory()` / `mx.get_peak_memory()` se exposto;
+    - fallback final para RAM somente quando GPU nao existir.
+
+- [ ] Definir budget explicito do prefix cache.
+  - Variaveis sugeridas:
+    - `EXO_KV_CACHE_MAX_BYTES`
+    - `EXO_KV_CACHE_MAX_ENTRIES`
+    - `EXO_KV_CACHE_MAX_TOKENS_PER_ENTRY`
+  - Evict antes de adicionar cache novo, nao depois de ja pressionar memoria.
+
+- [ ] Nao salvar cache prefixado quando a VRAM esta perto do limite.
+  - Arquivos:
+    - `src/exo/worker/engines/mlx/generator/generate.py`
+    - `src/exo/worker/engines/mlx/generator/batch_generate.py`
+  - Regra:
+    - se VRAM usada > threshold, responder sem persistir cache do request.
+
+- [ ] Adicionar endpoint de limpeza manual de cache.
+  - Endpoint sugerido:
+    - `POST /admin/cache/clear`
+  - Deve limpar:
+    - KV prefix cache;
+    - caches temporarios MLX;
+    - opcionalmente runner cache por modelo/instancia.
+
+## Prioridade 4 - Nao matar o modelo para liberar conversa
+
+- [ ] Separar "cache de conversa" de "modelo carregado".
+  - Modelo deve continuar carregado.
+  - Caches de prompt/KV devem poder ser limpos por conversa, request ou global.
+
+- [ ] Adicionar comando interno `ClearRunnerCaches`.
+  - Arquivos provaveis:
+    - `src/exo/shared/types/commands.py`
+    - `src/exo/shared/types/tasks.py`
+    - `src/exo/master/main.py`
+    - `src/exo/worker/main.py`
+    - `src/exo/worker/runner/runner.py`
+  - O comando deve chegar ao runner sem fazer `Shutdown`.
+
+- [ ] Adicionar metodo `Engine.clear_caches()`.
+  - Arquivo:
+    - `src/exo/worker/engines/base.py`
+  - Implementar em:
+    - `BatchGenerator`
+    - `SequentialGenerator`
+  - Deve limpar `KVPrefixCache` e caches temporarios, mantendo pesos do modelo.
+
+- [ ] Fazer o botao de delete/refresh do front chamar limpeza de cache.
+  - Arquivos provaveis em `dashboard/src`.
+  - Deletar chat nao deve apenas remover UI/localStorage; deve pedir ao backend
+    para liberar o que for associado a conversa.
+
+## Prioridade 5 - Melhorar uso distribuido sob contexto grande
+
+- [ ] Confirmar se prefill pesado esta realmente usando o grupo distribuido.
+  - Arquivos:
+    - `src/exo/worker/engines/mlx/generator/generate.py`
+    - `src/exo/worker/engines/mlx/auto_parallel.py`
+  - Logar rank, shard, pipeline/tensor, tokens processados por rank e memoria
+    por rank.
+
+- [ ] Revisar `prefill_step_size`.
+  - Hoje em `generate.py` existe `prefill_step_size = 4096`.
+  - Em GPU pequena, isso pode criar picos altos.
+  - Tornar configuravel:
+    - `EXO_PREFILL_STEP_SIZE=512|1024|2048|4096`
+  - Comecar com 512/1024 para RTX 3060.
+
+- [ ] Implementar retry automatico com chunk menor.
+  - Se OOM no prefill com step 4096:
+    - limpar memoria;
+    - tentar 2048;
+    - tentar 1024;
+    - tentar 512;
+    - se ainda falhar, erro claro.
+
+- [ ] Reduzir/evitar `logprobs` quando VRAM estiver baixa.
+  - `logprobs=true` e `top_logprobs` criam trabalho e memoria extra.
+  - Adicionar politica:
+    - negar `logprobs` para modelos grandes em VRAM baixa;
+    - ou permitir apenas quando explicitamente habilitado.
+
+## Prioridade 6 - Configuracao de perfil para GPUs pequenas
+
+- [ ] Criar perfil `small-vram`.
+  - Variavel:
+    - `EXO_PROFILE=small-vram`
+  - Efeitos:
+    - prefix cache agressivo ou desabilitado;
+    - prefill step menor;
+    - max prompt tokens menor;
+    - max output tokens padrao menor;
+    - `logprobs` desabilitado por padrao;
+    - thinking desabilitado por padrao se nao solicitado.
+
+- [ ] Criar perfil `agent-backend`.
+  - Focado em Hermes/Codex/OpenCode.
+  - Efeitos:
+    - erro claro quando o agente mandar prompt maior que o limite;
+    - truncamento opcional;
+    - cache por conversa com endpoint de limpeza;
+    - sem warmup pesado quando VRAM estiver no limite.
+
+## Prioridade 7 - Backend llama.cpp/GGUF
+
+- [ ] Avaliar backend llama.cpp como alternativa ao MLX-CUDA.
+  - Objetivo:
+    - offload CPU/GPU mais maduro;
+    - KV cache mais controlavel;
+    - mmap/GGUF;
+    - degradar para RAM em vez de morrer.
+
+- [ ] Criar interface de engine compativel com `Engine`.
+  - Arquivo base:
+    - `src/exo/worker/engines/base.py`
+  - Nova implementacao sugerida:
+    - `src/exo/worker/engines/llamacpp/`
+
+- [ ] Comecar sem distribuicao.
+  - Primeiro objetivo:
+    - uma maquina responde estavel via API OpenAI-compatible.
+  - Depois:
+    - avaliar split/offload distribuido se fizer sentido.
+
+## Prioridade 8 - Testes
+
+- [ ] Testes unitarios para truncamento/preflight.
+  - Arquivos provaveis:
+    - `src/exo/api/tests/test_chat_completions_stream.py`
+    - novo `src/exo/api/tests/test_context_limits.py`
+
+- [ ] Testes unitarios para eviction por VRAM.
+  - Arquivo existente:
+    - `src/exo/worker/tests/unittests/test_mlx/test_kv_prefix_cache.py`
+  - Mockar medidor de VRAM e validar LRU.
+
+- [ ] Testes de recuperacao apos OOM simulado.
+  - Simular excecao no prefill/decode.
+  - Verificar:
+    - request retorna erro;
+    - runner volta para ready;
+    - caches sao limpos;
+    - proximo request pequeno funciona.
+
+- [ ] Teste de endpoint `POST /admin/cache/clear`.
+  - Verificar que limpa cache sem destruir instancia/modelo.
+
+## Ordem recomendada de implementacao
+
+1. Logging de tokens e VRAM por request.
+2. Preflight com limite de prompt e erro claro.
+3. Limpeza centralizada de memoria em `finally`.
+4. Captura de OOM e recuperacao do runner.
+5. Eviction do KV cache usando VRAM, nao RAM.
+6. Endpoint/comando para limpar caches sem matar modelo.
+7. `EXO_PROFILE=small-vram`.
+8. Ajuste dinamico de `prefill_step_size`.
+9. Avaliacao de backend llama.cpp.
+
+## Config inicial recomendada para RTX 3060 12GB
+
+```bash
+export EXO_PROFILE=small-vram
+export EXO_MAX_PROMPT_TOKENS=4096
+export EXO_PREFILL_STEP_SIZE=1024
+export EXO_KV_CACHE_MAX_ENTRIES=1
+export EXO_MEMORY_THRESHOLD=0.70
+```
+
+Para agente tipo Hermes, testar primeiro com 4k. Depois subir para 8k somente
+se o runner conseguir responder varias chamadas seguidas sem precisar reiniciar
+o Exo.
+
