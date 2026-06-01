@@ -258,6 +258,16 @@ Common missing library errors:
 
 - `libcublasLt.so.13`: install `cublas-cuda-13` and run `ldconfig`.
 - `libnvrtc.so.13`: install `cuda-nvrtc-13-*`, set `LD_LIBRARY_PATH`.
+- `libtorch_cuda.so: undefined symbol: ncclCommResume`: PyTorch is loading an
+  incompatible system NCCL before the NCCL packaged in the Python environment.
+  Start exo with `scripts/start_exo_detached.sh`, or manually prepend the
+  virtualenv NVIDIA libraries before launching:
+  ```bash
+  cd ~/exo
+  PY_NVIDIA_LIBS=$(find .venv/lib -path '*/site-packages/nvidia/*/lib' -type d 2>/dev/null | paste -sd: -)
+  export LD_LIBRARY_PATH="$PY_NVIDIA_LIBS:${LD_LIBRARY_PATH:-}"
+  uv run --extra mlx-cuda13 python -c "import torch; print(torch.__version__)"
+  ```
 - `Can not find locations of CUDA headers`: set `CUDA_HOME`/`CUDA_PATH` and
   install `cuda-toolkit-13-*`.
 - `No module named 'torch'`: run `uv sync --extra mlx-cuda13` or install torch

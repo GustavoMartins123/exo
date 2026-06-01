@@ -18,6 +18,8 @@ fi
 
 COMMAND="cd '$EXO_DIR' && \
 source '$HOME/.bashrc' >/dev/null 2>&1 || true && \
+PY_NVIDIA_LIBS=\$(find '$EXO_DIR/.venv/lib' -path '*/site-packages/nvidia/*/lib' -type d 2>/dev/null | paste -sd: -) && \
+if [ -n \"\$PY_NVIDIA_LIBS\" ]; then export LD_LIBRARY_PATH=\"\$PY_NVIDIA_LIBS:\${LD_LIBRARY_PATH:-}\"; fi && \
 export EXO_LIBP2P_NAMESPACE='$CLUSTER_NAMESPACE' && \
 uv run --extra '$EXO_EXTRA' exo $EXO_ARGS"
 

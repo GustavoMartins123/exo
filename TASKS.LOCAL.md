@@ -300,6 +300,21 @@ Hoje o comportamento ruim observado e:
 - [ ] Teste de endpoint `POST /admin/cache/clear`.
   - Verificar que limpa cache sem destruir instancia/modelo.
 
+## Incidentes corrigidos
+
+- [x] Corrigir conflito PyTorch/NCCL ao iniciar pelo script detached.
+  - Sintoma:
+    - `libtorch_cuda.so: undefined symbol: ncclCommResume`.
+  - Causa provavel:
+    - `LD_LIBRARY_PATH` carregando NCCL do sistema antes do NCCL empacotado no
+      `.venv`.
+  - Correcao:
+    - `scripts/start_exo_detached.sh` agora coloca
+      `.venv/lib/.../site-packages/nvidia/*/lib` no inicio do
+      `LD_LIBRARY_PATH`.
+    - `docs/linux-nvidia-cluster-setup.md` documenta o diagnostico e o comando
+      manual de fallback.
+
 ## Ordem recomendada de implementacao
 
 1. Logging de tokens e VRAM por request.
