@@ -315,6 +315,13 @@ Hoje o comportamento ruim observado e:
     - `docs/linux-nvidia-cluster-setup.md` documenta o diagnostico e o comando
       manual de fallback.
 
+- [x] Documentar instalacao explicita do PyTorch CUDA 13 e parada do Exo.
+  - `docs/linux-nvidia-cluster-setup.md` agora destaca:
+    - `uv pip install --index-url https://download.pytorch.org/whl/cu130 \
+      torch torchvision torchaudio`;
+    - como parar sessao `tmux` do Exo;
+    - como parar processo iniciado por fallback `nohup`.
+
 ## Ordem recomendada de implementacao
 
 1. Logging de tokens e VRAM por request.

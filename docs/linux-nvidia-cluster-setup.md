@@ -230,10 +230,12 @@ cd ~/exo
 uv sync --extra mlx-cuda13
 ```
 
-If `torch` is missing later, install it explicitly:
+If `torch` is missing later, or if the wrong PyTorch wheel was installed,
+install the CUDA 13.0 wheels explicitly from the PyTorch index:
 
 ```bash
-uv pip install --index-url https://download.pytorch.org/whl/cu130 torch torchvision torchaudio
+uv pip install --index-url https://download.pytorch.org/whl/cu130 \
+  torch torchvision torchaudio
 ```
 
 ## 6. Validate CUDA/MLX/PyTorch
@@ -347,6 +349,20 @@ Reattach later:
 
 ```bash
 tmux attach -t exo
+```
+
+Stop exo when it was started in `tmux`:
+
+```bash
+tmux send-keys -t exo C-c
+tmux kill-session -t exo
+```
+
+If it was started with `scripts/start_exo_detached.sh` and fell back to `nohup`
+because `tmux` was unavailable:
+
+```bash
+kill "$(cat ~/.cache/exo/exo.detached.pid)"
 ```
 
 Open the dashboard:
