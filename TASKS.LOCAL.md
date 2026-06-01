@@ -33,7 +33,18 @@ Hoje o comportamento ruim observado e:
   - Medir onde acontece OOM: antes do prefill, durante prefill, durante decode ou
     ao salvar prefix cache.
 
-- [ ] Adicionar logging de memoria por request.
+- [x] Adicionar logging de memoria por request.
+  - Feito em `6a309a33`.
+  - Implementado em:
+    - `src/exo/worker/engines/mlx/memory.py`
+    - `src/exo/worker/engines/mlx/generator/generate.py`
+    - `src/exo/worker/engines/mlx/generator/batch_generate.py`
+  - Logs atuais usam prefixo `generation_memory` e incluem:
+    - prompt tokens;
+    - output max tokens;
+    - prefix cache hit;
+    - memoria MLX ativa/pico/cache quando disponivel;
+    - memoria CUDA/NVIDIA via NVML quando disponivel.
   - Arquivos provaveis:
     - `src/exo/api/main.py`
     - `src/exo/worker/runner/runner.py`
@@ -49,7 +60,13 @@ Hoje o comportamento ruim observado e:
 
 ## Prioridade 1 - Nao morrer com OOM
 
-- [ ] Capturar OOM CUDA/MLX em volta de prefill/decode.
+- [x] Capturar OOM CUDA/MLX em volta de prefill/decode.
+  - Feito em `6a309a33`.
+  - Implementado no wrapper do runner em
+    `src/exo/worker/runner/llm_inference/batch_generator.py`.
+  - OOM recuperavel envia `ErrorChunk`, finaliza a request com
+    `FinishedResponse`, limpa memoria e nao re-levanta a excecao.
+  - Ainda precisa validacao real em GPU depois que o cluster voltar.
   - Arquivo principal: `src/exo/worker/engines/mlx/generator/generate.py`
   - Tratar erros contendo:
     - `cudaMalloc`
@@ -62,7 +79,11 @@ Hoje o comportamento ruim observado e:
     - limpar caches temporarios;
     - manter o runner/modelo carregado se possivel.
 
-- [ ] Criar uma funcao central de limpeza de memoria MLX/CUDA.
+- [x] Criar uma funcao central de limpeza de memoria MLX/CUDA.
+  - Feito em `6a309a33`.
+  - Implementado como `clear_mlx_memory()` em
+    `src/exo/worker/engines/mlx/memory.py`.
+  - Tambem inclui `is_recoverable_mlx_oom()` para classificar OOM CUDA/MLX.
   - Arquivo sugerido: `src/exo/worker/engines/mlx/memory.py`
   - Deve executar:
     - `gc.collect()`;
@@ -70,7 +91,14 @@ Hoje o comportamento ruim observado e:
     - limpar prefix caches de request se necessario;
     - sincronizar/eval pendencias antes de medir novamente.
 
-- [ ] Garantir limpeza ao fim de todo request, com sucesso, cancelamento ou erro.
+- [x] Garantir limpeza ao fim de todo request, com sucesso, cancelamento ou erro.
+  - Feito em `4893149c`.
+  - Implementado em
+    `src/exo/worker/runner/llm_inference/batch_generator.py`.
+  - Fluxo normal preserva `KVPrefixCache`; OOM recuperavel limpa tambem o
+    prefix cache.
+  - Ainda precisa validacao real em GPU para confirmar queda de VRAM apos
+    sucesso/cancelamento/erro.
   - Arquivos provaveis:
     - `src/exo/worker/runner/runner.py`
     - `src/exo/worker/runner/llm_inference/batch_generator.py`
@@ -297,4 +325,3 @@ export EXO_MEMORY_THRESHOLD=0.70
 Para agente tipo Hermes, testar primeiro com 4k. Depois subir para 8k somente
 se o runner conseguir responder varias chamadas seguidas sem precisar reiniciar
 o Exo.
-
