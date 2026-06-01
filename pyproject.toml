@@ -53,11 +53,11 @@ mlx = [
   "mlx-vlm>=0.3.11",
   "mflux==0.17.5",
   "torch==2.10.0; sys_platform == 'darwin'",
-  "torch==2.10.0; sys_platform == 'linux'",
+  "torch==2.12.0; sys_platform == 'linux'",
   "torchaudio==2.10.0; sys_platform == 'darwin'",
-  "torchaudio==2.10.0; sys_platform == 'linux'",
+  "torchaudio==2.12.0; sys_platform == 'linux'",
   "torchvision==0.25.0; sys_platform == 'darwin'",
-  "torchvision==0.25.0; sys_platform == 'linux'",
+  "torchvision==0.27.0; sys_platform == 'linux'",
 ]
 mlx-cpu = ["exo[mlx]", "mlx-cpu==0.31.2; sys_platform == 'linux'"]
 mlx-cuda12 = [

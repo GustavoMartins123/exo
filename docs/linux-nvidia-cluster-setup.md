@@ -230,15 +230,13 @@ cd ~/exo
 uv sync --extra mlx-cuda13
 ```
 
-If `torch` is missing later, or if the wrong PyTorch wheel was installed,
-install the pinned CUDA 13.0 wheels explicitly from the PyTorch index. Do not
-leave these package names unpinned, because pip will otherwise select newer
-PyTorch/NCCL wheels that may not match this project:
+If `torch` is missing later, reinstall the CUDA 13.0 wheels explicitly from the
+PyTorch index using the same PyTorch family pinned by this project:
 
 ```bash
 uv pip install --index-url https://download.pytorch.org/whl/cu130 \
   --force-reinstall \
-  torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0
+  torch==2.12.0 torchvision==0.27.0 torchaudio==2.12.0
 ```
 
 ## 6. Validate CUDA/MLX/PyTorch

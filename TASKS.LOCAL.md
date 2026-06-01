@@ -318,19 +318,22 @@ Hoje o comportamento ruim observado e:
 - [x] Documentar instalacao explicita do PyTorch CUDA 13 e parada do Exo.
   - `docs/linux-nvidia-cluster-setup.md` agora destaca:
     - `uv pip install --index-url https://download.pytorch.org/whl/cu130 \
-      --force-reinstall torch==2.10.0 torchvision==0.25.0
-      torchaudio==2.10.0`;
+      --force-reinstall torch==2.12.0 torchvision==0.27.0
+      torchaudio==2.12.0`;
     - como parar sessao `tmux` do Exo;
     - como parar processo iniciado por fallback `nohup`.
 
-- [x] Corrigir comando de reinstall PyTorch para usar versoes pinadas.
+- [x] Atualizar projeto para usar PyTorch 2.12 CUDA 13.
   - Sintoma:
-    - comando sem pin instalou `torch 2.12.0+cu130` com
-      `nvidia-nccl-cu13 2.28.9`;
+    - maquinas estavam com `torch 2.12.0+cu130` instalado pelo indice CUDA 13;
+    - projeto ainda forçava `torch==2.10.0`;
     - import falhou com `undefined symbol: ncclCommResume`.
   - Correcao:
-    - docs agora reinstalam explicitamente `torch==2.10.0`,
-      `torchvision==0.25.0`, `torchaudio==2.10.0`.
+    - `pyproject.toml` agora fixa no Linux `torch==2.12.0`,
+      `torchvision==0.27.0`, `torchaudio==2.12.0`;
+    - Darwin ficou na familia `2.10` porque o lock nao encontrou
+      `torchaudio==2.12.0` para esse alvo;
+    - docs agora reinstalam explicitamente essa familia de versoes.
 
 ## Ordem recomendada de implementacao
 
