@@ -43,6 +43,9 @@ class Engine(ABC):
     def close(self) -> None: ...
 
     @abstractmethod
+    def clear_caches(self, cache_slot: str | None = None) -> int: ...
+
+    @abstractmethod
     def serve_prefill(self, request: PrefillRequest, wfile: BinaryIO) -> None: ...
 
 

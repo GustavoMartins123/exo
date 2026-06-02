@@ -57,6 +57,11 @@ class TaskFinished(BaseCommand):
     finished_command_id: CommandId
 
 
+class ClearRunnerCaches(BaseCommand):
+    model_id: ModelId
+    cache_slot: str | None = None
+
+
 class SendInputChunk(BaseCommand):
     """Command to send an input image chunk (converted to event by master)."""
 
@@ -114,6 +119,7 @@ Command = (
     | DeleteInstance
     | TaskCancelled
     | TaskFinished
+    | ClearRunnerCaches
     | SendInputChunk
     | AddCustomModelCard
     | DeleteCustomModelCard

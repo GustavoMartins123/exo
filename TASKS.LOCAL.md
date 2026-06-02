@@ -231,8 +231,12 @@ Hoje o comportamento ruim observado e:
     - `KVPrefixCache` armazena slot por entrada;
     - busca/update/add de prefix cache agora ficam isolados por slot;
     - `KVPrefixCache.clear_slot()` remove entradas de um slot localmente.
+    - `POST /v1/cache/clear` e `POST /admin/cache/clear` enviam comando de
+      limpeza sem descarregar o modelo;
+    - comando `ClearRunnerCaches` vira task por runner do modelo;
+    - runner chama `Engine.clear_caches(cache_slot)` e volta para
+      `RunnerReady`.
   - Falta:
-    - comando/API para limpar slot no runner sem matar modelo;
     - budget por slot;
     - telemetria por slot.
 

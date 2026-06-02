@@ -6,6 +6,7 @@ from exo.shared.types.chunks import InputImageChunk
 from exo.shared.types.common import CommandId, ModelId, NodeId
 from exo.shared.types.tasks import (
     CancelTask,
+    ClearRunnerCaches,
     ConnectToGroup,
     CreateRunner,
     DownloadModel,
@@ -307,7 +308,9 @@ def _pending_tasks(
     for task in tasks.values():
         # for now, just forward chat completions
         # TODO(ciaran): do this better!
-        if not isinstance(task, (TextGeneration, ImageGeneration, ImageEdits)):
+        if not isinstance(
+            task, (TextGeneration, ImageGeneration, ImageEdits, ClearRunnerCaches)
+        ):
             continue
         if task.task_status not in (TaskStatus.Pending, TaskStatus.Running):
             continue
@@ -329,6 +332,11 @@ def _pending_tasks(
         for runner in runners.values():
             if task.instance_id != runner.bound_instance.instance.instance_id:
                 continue
+            if (
+                isinstance(task, ClearRunnerCaches)
+                and task.runner_id != runner.bound_instance.bound_runner_id
+            ):
+                continue
 
             # the task status _should_ be set to completed by the LAST runner
             # it is currently set by the first
@@ -336,7 +344,11 @@ def _pending_tasks(
             if task.task_id in runner.completed or task.task_id in runner.in_progress:
                 continue
 
-            if isinstance(runner.status, (RunnerReady, RunnerRunning)) and all(
+            ready_statuses = (RunnerReady, RunnerRunning)
+            if isinstance(task, ClearRunnerCaches):
+                ready_statuses = (RunnerReady,)
+
+            if isinstance(runner.status, ready_statuses) and all(
                 isinstance(all_runners[global_runner_id], (RunnerReady, RunnerRunning))
                 for global_runner_id in runner.bound_instance.instance.shard_assignments.runner_to_shard
             ):

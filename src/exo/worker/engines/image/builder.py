@@ -179,6 +179,9 @@ class ImageEngine(Engine):
         with contextlib.suppress(NameError, AttributeError):
             del self.image_model
 
+    def clear_caches(self, cache_slot: str | None = None) -> int:
+        return 0
+
     def serve_prefill(self, request: PrefillRequest, wfile: BinaryIO) -> None:
         raise NotImplementedError() from None
 

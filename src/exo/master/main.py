@@ -19,6 +19,7 @@ from exo.shared.apply import apply
 from exo.shared.constants import EXO_EVENT_LOG_DIR, EXO_TRACING_ENABLED
 from exo.shared.types.commands import (
     AddCustomModelCard,
+    ClearRunnerCaches,
     CreateInstance,
     DeleteCustomModelCard,
     DeleteInstance,
@@ -59,6 +60,9 @@ from exo.shared.types.events import (
 )
 from exo.shared.types.instance_link import InstanceLink
 from exo.shared.types.state import State
+from exo.shared.types.tasks import (
+    ClearRunnerCaches as ClearRunnerCachesTask,
+)
 from exo.shared.types.tasks import (
     ImageEdits as ImageEditsTask,
 )
@@ -354,6 +358,32 @@ class Master:
                                         for shard in selected_instance.shard_assignments.runner_to_shard.values()
                                     )
                                     self._expected_ranks[task_id] = ranks
+                        case ClearRunnerCaches():
+                            matching_instances = [
+                                instance
+                                for instance in self.state.instances.values()
+                                if instance.shard_assignments.model_id
+                                == command.model_id
+                            ]
+                            if not matching_instances:
+                                raise ValueError(
+                                    f"No instance found for model {command.model_id}"
+                                )
+                            for instance in matching_instances:
+                                for runner_id in instance.shard_assignments.runner_to_shard:
+                                    task_id = TaskId()
+                                    generated_events.append(
+                                        TaskCreated(
+                                            task_id=task_id,
+                                            task=ClearRunnerCachesTask(
+                                                task_id=task_id,
+                                                instance_id=instance.instance_id,
+                                                task_status=TaskStatus.Pending,
+                                                runner_id=runner_id,
+                                                cache_slot=command.cache_slot,
+                                            ),
+                                        )
+                                    )
                         case DeleteInstance():
                             placement = delete_instance(command, self.state.instances)
                             transition_events = get_transition_events(

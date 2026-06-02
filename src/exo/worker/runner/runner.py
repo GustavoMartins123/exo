@@ -18,6 +18,7 @@ from exo.shared.types.events import (
     TaskStatusUpdated,
 )
 from exo.shared.types.tasks import (
+    ClearRunnerCaches,
     ConnectToGroup,
     GenerationTask,
     ImageEdits,
@@ -302,6 +303,19 @@ class Runner:
                 return_code = self.handle_generation_tasks(starting_task=task)
                 if return_code == ExitCode.Shutdown:
                     return
+
+            case ClearRunnerCaches() if isinstance(self.current_status, RunnerReady):
+                assert isinstance(self.generator, Engine)
+                removed = self.generator.clear_caches(task.cache_slot)
+                logger.info(
+                    f"runner cleared {removed} cache entr"
+                    f"{'y' if removed == 1 else 'ies'} for slot={task.cache_slot}"
+                )
+                self.acknowledge_task(task)
+                self.send_task_status(task.task_id, TaskStatus.Complete)
+                self.update_status(
+                    RunnerReady(prefill_server_port=self._prefill_server_port)
+                )
 
             case Shutdown():
                 self.shutdown(task)

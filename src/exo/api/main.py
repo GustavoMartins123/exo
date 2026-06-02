@@ -63,6 +63,8 @@ from exo.api.types import (
     ChatCompletionMessage,
     ChatCompletionRequest,
     ChatCompletionResponse,
+    ClearCacheRequest,
+    ClearCacheResponse,
     CreateInstanceParams,
     CreateInstanceResponse,
     DeleteDownloadResponse,
@@ -155,6 +157,7 @@ from exo.shared.types.chunks import (
 from exo.shared.types.commands import (
     AddCustomModelCard,
     CancelDownload,
+    ClearRunnerCaches,
     Command,
     CreateInstance,
     DeleteCustomModelCard,
@@ -377,6 +380,8 @@ class API:
         self.app.post("/v1/messages", response_model=None)(self.claude_messages)
         self.app.post("/v1/responses", response_model=None)(self.openai_responses)
         self.app.post("/v1/cancel/{command_id}")(self.cancel_command)
+        self.app.post("/v1/cache/clear")(self.clear_cache)
+        self.app.post("/admin/cache/clear")(self.clear_cache)
 
         # Ollama API
         self.app.head("/ollama/")(self.ollama_version)
@@ -753,6 +758,21 @@ class API:
         return CancelCommandResponse(
             message="Command cancelled.",
             command_id=command_id,
+        )
+
+    async def clear_cache(self, payload: ClearCacheRequest) -> ClearCacheResponse:
+        """Clear runner KV/prefix caches without unloading the model."""
+        validated_model = await self._validate_model_has_instance(payload.model)
+        await self._send(
+            ClearRunnerCaches(
+                model_id=validated_model,
+                cache_slot=payload.cache_slot,
+            )
+        )
+        return ClearCacheResponse(
+            message="Cache clear requested.",
+            model=str(validated_model),
+            cache_slot=payload.cache_slot,
         )
 
     async def _token_chunk_stream(

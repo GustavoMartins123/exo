@@ -323,6 +323,17 @@ class CancelCommandResponse(BaseModel):
     command_id: CommandId
 
 
+class ClearCacheRequest(BaseModel):
+    model: ModelId
+    cache_slot: str | None = None
+
+
+class ClearCacheResponse(BaseModel):
+    message: str
+    model: str
+    cache_slot: str | None = None
+
+
 class InstanceLinkBody(BaseModel):
     prefill_instances: list[InstanceId]
     decode_instances: list[InstanceId]

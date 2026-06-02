@@ -241,8 +241,9 @@ class KVPrefixCache:
         self._access_counter: int = 0
         self._group = group
 
-    def clear(self):
+    def clear(self) -> int:
         """Clear all cached prompts and caches."""
+        removed = len(self.prompts)
         self.prompts.clear()
         self.caches.clear()
         self._snapshots.clear()
@@ -250,6 +251,7 @@ class KVPrefixCache:
         self._cache_slots.clear()
         self._last_used.clear()
         self.prefill_tps.clear()
+        return removed
 
     def clear_slot(self, cache_slot: str | None) -> int:
         """Clear cached prompts and caches for one conversation slot."""

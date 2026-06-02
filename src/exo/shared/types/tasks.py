@@ -69,6 +69,11 @@ class CancelTask(BaseTask):
     runner_id: RunnerId
 
 
+class ClearRunnerCaches(BaseTask):
+    runner_id: RunnerId
+    cache_slot: str | None = None
+
+
 class ImageGeneration(BaseTask):  # emitted by Master
     command_id: CommandId
     task_params: ImageGenerationTaskParams
@@ -97,6 +102,7 @@ Task = (
     | StartWarmup
     | TextGeneration
     | CancelTask
+    | ClearRunnerCaches
     | ImageGeneration
     | ImageEdits
     | Shutdown

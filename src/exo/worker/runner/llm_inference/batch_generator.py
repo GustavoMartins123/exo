@@ -368,6 +368,17 @@ class SequentialGenerator(Engine):
     def close(self) -> None:
         del self.model, self.tokenizer, self.group
 
+    def clear_caches(self, cache_slot: str | None = None) -> int:
+        if self.kv_prefix_cache is None:
+            return 0
+        removed = (
+            self.kv_prefix_cache.clear_slot(cache_slot)
+            if cache_slot is not None
+            else self.kv_prefix_cache.clear()
+        )
+        clear_mlx_memory(kv_prefix_cache=self.kv_prefix_cache)
+        return removed or 0
+
     def serve_prefill(self, request: PrefillRequest, wfile: BinaryIO) -> None:
         cache = run_prefill_for_request(
             model=self.model,
@@ -682,6 +693,17 @@ class BatchGenerator(Engine):
     def close(self) -> None:
         self._gen.close()
         del self.model, self.tokenizer, self.group
+
+    def clear_caches(self, cache_slot: str | None = None) -> int:
+        if self.kv_prefix_cache is None:
+            return 0
+        removed = (
+            self.kv_prefix_cache.clear_slot(cache_slot)
+            if cache_slot is not None
+            else self.kv_prefix_cache.clear()
+        )
+        clear_mlx_memory(kv_prefix_cache=self.kv_prefix_cache)
+        return removed or 0
 
     def serve_prefill(self, request: PrefillRequest, wfile: BinaryIO) -> None:
         cache = run_prefill_for_request(
