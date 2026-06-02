@@ -213,6 +213,11 @@ Hoje o comportamento ruim observado e:
     - `ChatCompletionRequest` aceita `truncation`;
     - politica padrao OpenAI-compatible: `drop_oldest`;
     - politica estrita disponivel: `error`;
+    - `/v1/models` anuncia `effective_context_length`/`max_model_len`
+      operacional default de 32k para modelos maiores, em vez de expor 128k
+      como se fosse seguro por padrao;
+    - se a request nao trouxer contexto explicito, o worker usa o mesmo
+      default operacional de 32k antes do preflight de VRAM;
     - quando `drop_oldest` esta ativa, prompt tokenizado e cortado antes do
       prefill preservando prefixo inicial protegido e final recente;
     - truncamento e bloqueado para vision quando nao ha forma segura de

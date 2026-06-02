@@ -137,6 +137,7 @@ from exo.shared.constants import (
     EXO_MAX_CHUNK_SIZE,
     EXO_TRACING_CACHE_DIR,
 )
+from exo.shared.context_limits import effective_server_context_length
 from exo.shared.election import ElectionMessage
 from exo.shared.logging import InterceptLogger
 from exo.shared.models import model_cards
@@ -1825,6 +1826,9 @@ class API:
     ) -> ModelListModel:
         downloaded = card.model_id in downloaded_model_ids
         loaded = card.model_id in loaded_model_ids
+        effective_context_length, context_limit_source = (
+            effective_server_context_length(card.context_length)
+        )
         return ModelListModel(
             id=card.model_id,
             hugging_face_id=card.model_id,
@@ -1841,9 +1845,9 @@ class API:
             capabilities=card.capabilities,
             reasoning_dialect=card.reasoning_dialect,
             context_length=card.context_length,
-            effective_context_length=card.context_length,
-            context_limit_source="model_card",
-            max_model_len=card.context_length,
+            effective_context_length=effective_context_length,
+            context_limit_source=context_limit_source,
+            max_model_len=effective_context_length,
             loaded=loaded,
             downloaded=downloaded,
         )
@@ -1926,6 +1930,9 @@ class API:
         # returns the new model without waiting for the event round-trip.
         model_cards.card_cache.cc[card.model_id] = card
 
+        effective_context_length, context_limit_source = (
+            effective_server_context_length(card.context_length)
+        )
         return ModelListModel(
             id=card.model_id,
             hugging_face_id=card.model_id,
@@ -1937,8 +1944,9 @@ class API:
             tasks=[task.value for task in card.tasks],
             is_custom=True,
             context_length=card.context_length,
-            effective_context_length=card.context_length,
-            context_limit_source="model_card",
+            effective_context_length=effective_context_length,
+            context_limit_source=context_limit_source,
+            max_model_len=effective_context_length,
         )
 
     async def delete_custom_model(self, model_id: ModelId) -> JSONResponse:

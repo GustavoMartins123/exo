@@ -1,3 +1,4 @@
+from exo.shared.context_limits import default_server_context_tokens
 from exo.shared.models import model_cards
 from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.worker.engines.mlx.constants import MAX_TOKENS
@@ -10,7 +11,10 @@ def effective_context_limit(task: TextGenerationTaskParams) -> int | None:
     )
 
     if task.max_context_tokens is None:
-        return model_context_limit
+        default_context_limit = default_server_context_tokens()
+        if model_context_limit is None:
+            return default_context_limit
+        return min(model_context_limit, default_context_limit)
     if task.max_context_tokens <= 0:
         raise ValueError(
             f"max_context_tokens must be greater than zero, got {task.max_context_tokens}"

@@ -98,6 +98,23 @@ def test_model_context_caps_larger_request_context(
         )
 
 
+def test_server_default_caps_model_context_when_request_has_no_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("EXO_DEFAULT_CONTEXT_TOKENS", raising=False)
+    monkeypatch.setattr(
+        model_cards.card_cache,
+        "get",
+        _fake_card_131072,
+    )
+
+    with pytest.raises(ValueError, match="max_context_tokens=32768"):
+        validate_generation_context(
+            _task(max_context_tokens=None, max_output_tokens=1024),
+            prompt_tokens=39000,
+        )
+
+
 def test_larger_request_context_is_accepted_when_model_supports_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

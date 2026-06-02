@@ -159,3 +159,25 @@ def test_v1_models_route_uses_available_models_only() -> None:
     ]
     assert payload["data"][0]["loaded"] is True
     assert payload["data"][0]["max_model_len"] == 32768
+
+
+def test_v1_models_advertises_server_default_context_for_large_models() -> None:
+    loaded_card = _card(
+        "mlx-community/gpt-oss-20b-MXFP4-Q8",
+        context_length=131072,
+        quantization="MXFP4-Q8",
+    )
+    api = _api_with_state(
+        State(instances={InstanceId("instance-1"): _loaded_instance(loaded_card)})
+    )
+    api.app = FastAPI()
+    api.app.get("/v1/models")(api.get_openai_models)
+
+    client = TestClient(api.app)
+    payload: dict[str, Any] = client.get("/v1/models").json()
+
+    model = payload["data"][0]
+    assert model["context_length"] == 131072
+    assert model["effective_context_length"] == 32768
+    assert model["max_model_len"] == 32768
+    assert model["context_limit_source"] == "server_default"
