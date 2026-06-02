@@ -159,6 +159,15 @@ Hoje o comportamento ruim observado e:
     - `make_kv_cache` agora reduz `RotatingKVCache.max_size` para o limite
       efetivo da request/modelo, inclusive em caches criados por
       `model.make_cache()`.
+    - `/v1/models` agora lista somente modelos localmente disponiveis para
+      clientes OpenAI-compatible:
+      - modelos com instancia carregada;
+      - modelos com download concluido no estado do cluster;
+      - modelos carregados aparecem primeiro;
+      - metadata inclui `loaded`, `downloaded`, `context_length`,
+        `effective_context_length`, `max_model_len` e `quantization`;
+      - o catalogo completo continua em `/models` e tambem foi exposto como
+        `/models/catalog`.
   - Observacao:
     - isso limita o contexto dinamico por request; redistribuicao proporcional
       de KV/cache entre GPUs continua na prioridade 5.

@@ -355,7 +355,8 @@ class API:
         self.app.delete("/v1/instance-links/{link_id}")(self.delete_instance_link)
         self.app.get("/v1/feature-flags")(self.get_feature_flags)
         self.app.get("/models")(self.get_models)
-        self.app.get("/v1/models")(self.get_models)
+        self.app.get("/models/catalog")(self.get_models)
+        self.app.get("/v1/models")(self.get_openai_models)
         self.app.post("/models/add")(self.add_custom_model)
         self.app.delete("/models/custom/{model_id:path}")(self.delete_custom_model)
         self.app.get("/models/search")(self.search_models)
@@ -1781,40 +1782,107 @@ class API:
 
         return total_available
 
+    def _downloaded_model_ids(self) -> set[ModelId]:
+        downloaded_model_ids: set[ModelId] = set()
+        for node_downloads in self.state.downloads.values():
+            for dl in node_downloads:
+                if isinstance(dl, DownloadCompleted):
+                    downloaded_model_ids.add(dl.shard_metadata.model_card.model_id)
+        return downloaded_model_ids
+
+    def _loaded_model_ids(self) -> set[ModelId]:
+        return {
+            instance.shard_assignments.model_id
+            for instance in self.state.instances.values()
+        }
+
+    def _model_list_model(
+        self,
+        card: ModelCard,
+        *,
+        downloaded_model_ids: set[ModelId],
+        loaded_model_ids: set[ModelId],
+    ) -> ModelListModel:
+        downloaded = card.model_id in downloaded_model_ids
+        loaded = card.model_id in loaded_model_ids
+        return ModelListModel(
+            id=card.model_id,
+            hugging_face_id=card.model_id,
+            name=card.model_id.short(),
+            description="",
+            tags=[],
+            storage_size_megabytes=card.storage_size.in_mb,
+            supports_tensor=card.supports_tensor,
+            tasks=[task.value for task in card.tasks],
+            is_custom=card.is_custom,
+            family=card.family,
+            quantization=card.quantization,
+            base_model=card.base_model,
+            capabilities=card.capabilities,
+            reasoning_dialect=card.reasoning_dialect,
+            context_length=card.context_length,
+            effective_context_length=card.context_length,
+            context_limit_source="model_card",
+            max_model_len=card.context_length,
+            loaded=loaded,
+            downloaded=downloaded,
+        )
+
     async def get_models(self, status: str | None = Query(default=None)) -> ModelList:
-        """Returns list of available models, optionally filtered by being downloaded."""
+        """Returns the local model-card catalog, optionally filtered by download status."""
         cards = await model_cards.card_cache.list_all()
+        downloaded_model_ids = self._downloaded_model_ids()
+        loaded_model_ids = self._loaded_model_ids()
 
         if status == "downloaded":
-            downloaded_model_ids: set[str] = set()
-            for node_downloads in self.state.downloads.values():
-                for dl in node_downloads:
-                    if isinstance(dl, DownloadCompleted):
-                        downloaded_model_ids.add(dl.shard_metadata.model_card.model_id)
             cards = [c for c in cards if c.model_id in downloaded_model_ids]
 
         return ModelList(
             data=[
-                ModelListModel(
-                    id=card.model_id,
-                    hugging_face_id=card.model_id,
-                    name=card.model_id.short(),
-                    description="",
-                    tags=[],
-                    storage_size_megabytes=card.storage_size.in_mb,
-                    supports_tensor=card.supports_tensor,
-                    tasks=[task.value for task in card.tasks],
-                    is_custom=card.is_custom,
-                    family=card.family,
-                    quantization=card.quantization,
-                    base_model=card.base_model,
-                    capabilities=card.capabilities,
-                    reasoning_dialect=card.reasoning_dialect,
-                    context_length=card.context_length,
-                    effective_context_length=card.context_length,
-                    context_limit_source="model_card",
+                self._model_list_model(
+                    card,
+                    downloaded_model_ids=downloaded_model_ids,
+                    loaded_model_ids=loaded_model_ids,
                 )
                 for card in cards
+            ]
+        )
+
+    async def get_openai_models(self) -> ModelList:
+        """Returns only models currently usable by OpenAI-compatible clients."""
+        downloaded_model_ids = self._downloaded_model_ids()
+        loaded_model_ids = self._loaded_model_ids()
+        available_model_ids = downloaded_model_ids | loaded_model_ids
+        if not available_model_ids:
+            return ModelList(data=[])
+
+        cards_by_id: dict[ModelId, ModelCard] = {}
+        for instance in self.state.instances.values():
+            for shard in instance.shard_assignments.runner_to_shard.values():
+                cards_by_id.setdefault(shard.model_card.model_id, shard.model_card)
+        for node_downloads in self.state.downloads.values():
+            for dl in node_downloads:
+                if isinstance(dl, DownloadCompleted):
+                    card = dl.shard_metadata.model_card
+                    cards_by_id.setdefault(card.model_id, card)
+
+        sorted_cards = sorted(
+            cards_by_id.values(),
+            key=lambda card: (
+                card.model_id not in loaded_model_ids,
+                card.model_id not in downloaded_model_ids,
+                str(card.model_id),
+            ),
+        )
+        return ModelList(
+            data=[
+                self._model_list_model(
+                    card,
+                    downloaded_model_ids=downloaded_model_ids,
+                    loaded_model_ids=loaded_model_ids,
+                )
+                for card in sorted_cards
+                if card.model_id in available_model_ids
             ]
         )
 
