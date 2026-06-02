@@ -9,6 +9,7 @@ from exo.shared.types.worker.runner_response import (
     CancelledResponse,
     FinishedResponse,
     ModelLoadingResponse,
+    RecoverableErrorResponse,
 )
 from exo.worker.disaggregated.server import PrefillRequest
 
@@ -34,7 +35,9 @@ class Engine(ABC):
     @abstractmethod
     def step(
         self,
-    ) -> Iterable[tuple[TaskId, Chunk | CancelledResponse | FinishedResponse]]: ...
+    ) -> Iterable[
+        tuple[TaskId, Chunk | CancelledResponse | FinishedResponse | RecoverableErrorResponse]
+    ]: ...
 
     @abstractmethod
     def close(self) -> None: ...

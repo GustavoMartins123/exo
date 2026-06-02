@@ -34,6 +34,7 @@ from exo.shared.types.worker.instances import BoundInstance
 from exo.shared.types.worker.runner_response import (
     CancelledResponse,
     FinishedResponse,
+    RecoverableErrorResponse,
 )
 from exo.shared.types.worker.runners import (
     RunnerConnected,
@@ -42,6 +43,7 @@ from exo.shared.types.worker.runners import (
     RunnerLoaded,
     RunnerLoading,
     RunnerReady,
+    RunnerRecoverableError,
     RunnerRunning,
     RunnerShutdown,
     RunnerShuttingDown,
@@ -349,6 +351,12 @@ class Runner:
                     case FinishedResponse():
                         self.send_task_status(task_id, TaskStatus.Complete)
                         finished.append(task_id)
+                    case RecoverableErrorResponse():
+                        self.update_status(
+                            RunnerRecoverableError(
+                                error_message=result.error_message
+                            )
+                        )
                     case other:
                         self.send_chunk(other, self.active_tasks[task_id].command_id)
 

@@ -55,6 +55,10 @@ class RunnerRunning(BaseRunnerStatus):
     pass
 
 
+class RunnerRecoverableError(BaseRunnerStatus):
+    error_message: str
+
+
 class RunnerShuttingDown(BaseRunnerStatus):
     pass
 
@@ -77,6 +81,7 @@ RunnerStatus = (
     | RunnerWarmingUp
     | RunnerReady
     | RunnerRunning
+    | RunnerRecoverableError
     | RunnerShuttingDown
     | RunnerShutdown
     | RunnerFailed

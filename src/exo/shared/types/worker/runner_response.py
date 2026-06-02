@@ -66,6 +66,10 @@ class FinishedResponse(BaseRunnerResponse):
     pass
 
 
+class RecoverableErrorResponse(BaseRunnerResponse):
+    error_message: str
+
+
 class ModelLoadingResponse(BaseRunnerResponse):
     layers_loaded: int
     total: int

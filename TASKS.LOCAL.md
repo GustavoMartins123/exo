@@ -105,10 +105,16 @@ Hoje o comportamento ruim observado e:
     - `src/exo/worker/engines/mlx/generator/generate.py`
   - Usar `try/finally` para soltar objetos temporarios do request.
 
-- [ ] Adicionar estado "runner recoverable error".
+- [x] Adicionar estado "runner recoverable error".
   - Hoje o erro tende a matar o runner ou deixar memoria presa.
   - O runner deve voltar para `RunnerReady` depois de limpar memoria quando o
     modelo ainda estiver integro.
+  - Feito:
+    - adicionado `RunnerRecoverableError`;
+    - erros recuperaveis do batch generator retornam `RecoverableErrorResponse`;
+    - runner publica `RunnerRecoverableError`, completa a task e volta para
+      `RunnerReady`;
+    - teste unitario cobre o retorno para `RunnerReady` apos OOM recuperavel.
 
 ## Prioridade 2 - Limites reais de contexto e preflight
 

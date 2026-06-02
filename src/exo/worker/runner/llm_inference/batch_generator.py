@@ -23,6 +23,7 @@ from exo.shared.types.worker.runner_response import (
     CancelledResponse,
     FinishedResponse,
     GenerationResponse,
+    RecoverableErrorResponse,
 )
 from exo.utils.channels import MpReceiver, MpSender
 from exo.worker.disaggregated.server import PrefillRequest
@@ -167,18 +168,37 @@ class SequentialGenerator(Engine):
     def step(
         self,
     ) -> Iterator[
-        tuple[TaskId, GenerationChunk | FinishedResponse | CancelledResponse]
+        tuple[
+            TaskId,
+            GenerationChunk
+            | FinishedResponse
+            | CancelledResponse
+            | RecoverableErrorResponse,
+        ]
     ]:
         output: list[
-            tuple[TaskId, GenerationChunk | CancelledResponse | FinishedResponse]
+            tuple[
+                TaskId,
+                GenerationChunk
+                | CancelledResponse
+                | FinishedResponse
+                | RecoverableErrorResponse,
+            ]
         ] = []
 
         if self._active is None:
             self.agree_on_tasks()
 
             if self._queue:
-                failed_task_id = self._start_next()
-                if failed_task_id is not None:
+                recoverable_error = self._start_next()
+                if recoverable_error is not None:
+                    failed_task_id, error_message = recoverable_error
+                    output.append(
+                        (
+                            failed_task_id,
+                            RecoverableErrorResponse(error_message=error_message),
+                        )
+                    )
                     output.append((failed_task_id, FinishedResponse()))
                     return iter(output)
             else:
@@ -200,10 +220,16 @@ class SequentialGenerator(Engine):
             output.append((task.task_id, FinishedResponse()))
             self._active = None
             self._clear_request_memory()
-            if self._queue:
-                if (failed_task_id := self._start_next()) is not None:
-                    output.append((failed_task_id, FinishedResponse()))
-                    self._clear_request_memory()
+            if self._queue and (recoverable_error := self._start_next()) is not None:
+                failed_task_id, error_message = recoverable_error
+                output.append(
+                    (
+                        failed_task_id,
+                        RecoverableErrorResponse(error_message=error_message),
+                    )
+                )
+                output.append((failed_task_id, FinishedResponse()))
+                self._clear_request_memory()
 
         except Exception as e:
             if is_recoverable_mlx_oom(e):
@@ -212,11 +238,23 @@ class SequentialGenerator(Engine):
                     kv_prefix_cache=self.kv_prefix_cache,
                     clear_prefix_cache=True,
                 )
+                output.append(
+                    (task.task_id, RecoverableErrorResponse(error_message=str(e)))
+                )
                 output.append((task.task_id, FinishedResponse()))
                 self._active = None
-                if self._queue:
-                    if (failed_task_id := self._start_next()) is not None:
-                        output.append((failed_task_id, FinishedResponse()))
+                if (
+                    self._queue
+                    and (recoverable_error := self._start_next()) is not None
+                ):
+                    failed_task_id, error_message = recoverable_error
+                    output.append(
+                        (
+                            failed_task_id,
+                            RecoverableErrorResponse(error_message=error_message),
+                        )
+                    )
+                    output.append((failed_task_id, FinishedResponse()))
             else:
                 self._send_error(task, e)
                 self._active = None
@@ -232,7 +270,7 @@ class SequentialGenerator(Engine):
             ),
         )
 
-    def _start_next(self) -> TaskId | None:
+    def _start_next(self) -> tuple[TaskId, str] | None:
         task = self._queue.popleft()
         try:
             gen = self._build_generator(task)
@@ -243,7 +281,7 @@ class SequentialGenerator(Engine):
                     kv_prefix_cache=self.kv_prefix_cache,
                     clear_prefix_cache=True,
                 )
-                return task.task_id
+                return task.task_id, str(e)
             raise
         queue = GeneratorQueue[GenerationResponse]()
 
@@ -433,10 +471,22 @@ class BatchGenerator(Engine):
     def step(
         self,
     ) -> Iterator[
-        tuple[TaskId, GenerationChunk | CancelledResponse | FinishedResponse]
+        tuple[
+            TaskId,
+            GenerationChunk
+            | CancelledResponse
+            | FinishedResponse
+            | RecoverableErrorResponse,
+        ]
     ]:
         output: list[
-            tuple[TaskId, GenerationChunk | CancelledResponse | FinishedResponse]
+            tuple[
+                TaskId,
+                GenerationChunk
+                | CancelledResponse
+                | FinishedResponse
+                | RecoverableErrorResponse,
+            ]
         ] = []
 
         if not self._queue:
@@ -456,6 +506,9 @@ class BatchGenerator(Engine):
                     clear_mlx_memory(
                         kv_prefix_cache=self.kv_prefix_cache,
                         clear_prefix_cache=True,
+                    )
+                    output.append(
+                        (task.task_id, RecoverableErrorResponse(error_message=str(e)))
                     )
                     output.append((task.task_id, FinishedResponse()))
                     continue
@@ -493,6 +546,9 @@ class BatchGenerator(Engine):
                 raise
             for uid, (task, _, _) in list(self._active_tasks.items()):
                 self._send_error(task, e)
+                output.append(
+                    (task.task_id, RecoverableErrorResponse(error_message=str(e)))
+                )
                 output.append((task.task_id, FinishedResponse()))
                 self._active_tasks.pop(uid, None)
             self._gen.close()
