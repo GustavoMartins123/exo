@@ -47,7 +47,7 @@ from exo.worker.engines.mlx.generator.generate import (
 )
 from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
 from exo.worker.engines.mlx.memory import (
-    fit_mlx_max_output_tokens_to_memory,
+    fit_mlx_context_budget_to_memory,
     log_generation_memory,
 )
 from exo.worker.engines.mlx.patches.opt_batch_gen import (
@@ -170,12 +170,15 @@ class ExoBatchGenerator:
         validate_generation_context(task_params, len(all_prompt_tokens))
         max_kv_size = effective_context_limit(task_params)
         max_tokens = effective_max_output_tokens(task_params, len(all_prompt_tokens))
-        max_tokens = fit_mlx_max_output_tokens_to_memory(
+        context_budget_fit = fit_mlx_context_budget_to_memory(
             task_params,
             self.model,
             prompt_tokens=len(all_prompt_tokens),
             max_output_tokens=max_tokens,
+            max_context_tokens=max_kv_size,
         )
+        max_kv_size = context_budget_fit.max_context_tokens
+        max_tokens = context_budget_fit.max_output_tokens
 
         is_bench = task_params.bench
 

@@ -51,6 +51,20 @@ class MlxMemoryBudget:
     def bytes_per_token(self) -> int:
         return self.local_layers * 2 * self.kv_width * self.bytes_per_element
 
+    @property
+    def max_total_tokens_that_fit(self) -> int | None:
+        available_after_reserve = self.available_after_reserve_bytes
+        if available_after_reserve is None:
+            return None
+        return available_after_reserve // self.bytes_per_token
+
+
+@dataclass(frozen=True)
+class MlxContextBudgetFit:
+    max_context_tokens: int | None
+    max_output_tokens: int
+    budget: MlxMemoryBudget | None
+
 
 def _call_mx_memory_function(name: str) -> int | None:
     function = getattr(mx, name, None)
@@ -286,6 +300,96 @@ def fit_mlx_max_output_tokens_to_memory(
     return 1
 
 
+def fit_mlx_context_budget_to_memory(
+    task: TextGenerationTaskParams,
+    model: "Model",
+    *,
+    prompt_tokens: int,
+    max_output_tokens: int,
+    max_context_tokens: int | None,
+) -> MlxContextBudgetFit:
+    if os.environ.get("EXO_MLX_DISABLE_MEMORY_PREFLIGHT") == "1":
+        return MlxContextBudgetFit(
+            max_context_tokens=max_context_tokens,
+            max_output_tokens=max_output_tokens,
+            budget=None,
+        )
+
+    budget = estimate_mlx_kv_memory_budget(
+        task,
+        model,
+        prompt_tokens=prompt_tokens,
+        max_output_tokens=max_output_tokens,
+    )
+    if budget is None:
+        logger.info(
+            "generation_memory_budget unavailable "
+            f"model={task.model} prompt_tokens={prompt_tokens} "
+            f"max_output_tokens={max_output_tokens}"
+        )
+        return MlxContextBudgetFit(
+            max_context_tokens=max_context_tokens,
+            max_output_tokens=max_output_tokens,
+            budget=None,
+        )
+
+    requested_total_tokens = prompt_tokens + max_output_tokens
+    requested_context = max_context_tokens or requested_total_tokens
+    max_total_tokens_that_fit = budget.max_total_tokens_that_fit
+    logger.info(
+        "generation_memory_budget "
+        f"model={task.model} requested_context={requested_context} "
+        f"requested_total_tokens={requested_total_tokens} "
+        f"local_layers={budget.local_layers} kv_width={budget.kv_width} "
+        f"estimated_kv={_format_bytes(budget.estimated_kv_bytes)} "
+        f"cuda_free={_format_bytes(budget.cuda_free_bytes)} "
+        f"reserve={_format_bytes(budget.reserve_bytes)} "
+        f"kv_budget_tokens={max_total_tokens_that_fit}"
+    )
+    if max_total_tokens_that_fit is None:
+        return MlxContextBudgetFit(
+            max_context_tokens=max_context_tokens,
+            max_output_tokens=max_output_tokens,
+            budget=budget,
+        )
+
+    fitted_context = min(requested_context, max_total_tokens_that_fit)
+    if fitted_context < prompt_tokens:
+        raise ValueError(
+            "Request rejected before MLX prefill because estimated KV cache "
+            "for the prompt does not fit in available GPU memory: "
+            f"model={task.model}, "
+            f"prompt_tokens={prompt_tokens}, "
+            f"requested_context={requested_context}, "
+            f"kv_budget_tokens={max_total_tokens_that_fit}, "
+            f"cuda_free={_format_bytes(budget.cuda_free_bytes)}, "
+            f"reserve={_format_bytes(budget.reserve_bytes)}"
+        )
+
+    fitted_max_output_tokens = min(max_output_tokens, fitted_context - prompt_tokens)
+    if fitted_max_output_tokens < 1:
+        fitted_max_output_tokens = 1
+
+    if fitted_context != requested_context or fitted_max_output_tokens != max_output_tokens:
+        logger.warning(
+            "generation_memory_budget_clamped "
+            f"model={task.model} prompt_tokens={prompt_tokens} "
+            f"requested_context={requested_context} "
+            f"fitted_context={fitted_context} "
+            f"requested_max_output_tokens={max_output_tokens} "
+            f"fitted_max_output_tokens={fitted_max_output_tokens} "
+            f"kv_budget_tokens={max_total_tokens_that_fit} "
+            f"cuda_free={_format_bytes(budget.cuda_free_bytes)} "
+            f"reserve={_format_bytes(budget.reserve_bytes)}"
+        )
+
+    return MlxContextBudgetFit(
+        max_context_tokens=int(fitted_context),
+        max_output_tokens=int(fitted_max_output_tokens),
+        budget=budget,
+    )
+
+
 def enforce_mlx_memory_budget(
     task: TextGenerationTaskParams,
     model: "Model",
@@ -293,11 +397,12 @@ def enforce_mlx_memory_budget(
     prompt_tokens: int,
     max_output_tokens: int,
 ) -> None:
-    _ = fit_mlx_max_output_tokens_to_memory(
+    _ = fit_mlx_context_budget_to_memory(
         task,
         model,
         prompt_tokens=prompt_tokens,
         max_output_tokens=max_output_tokens,
+        max_context_tokens=None,
     )
 
 

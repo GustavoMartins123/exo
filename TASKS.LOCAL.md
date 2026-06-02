@@ -180,8 +180,71 @@ Hoje o comportamento ruim observado e:
       - loga `generation_memory_budget` com estimativa, VRAM livre e reserva.
       - loga `generation_memory_budget_clamped` quando aplica degradacao.
   - Observacao:
-    - isso limita o contexto dinamico por request; redistribuicao proporcional
-      de KV/cache entre GPUs continua na prioridade 5.
+    - isso ainda nao e equivalente ao `llama.cpp`; e apenas uma primeira
+      barreira de seguranca para nao matar o runner. O objetivo agora e
+      implementar gerenciamento de contexto/KV similar ou superior ao
+      `llama.cpp`, nao apenas parecido.
+
+## Prioridade 2.5 - Gerenciamento de contexto/KV no nivel llama.cpp ou superior
+
+- [x] Definir `n_ctx_effective` por request a partir de VRAM real.
+  - O limite de KV nao deve ser somente o `context_length` do model card.
+  - Deve ser o menor entre:
+    - contexto pedido pelo cliente/provider;
+    - contexto maximo do modelo;
+    - contexto que cabe na VRAM local para o shard carregado.
+  - Esse valor deve alimentar `make_kv_cache(max_kv_size=...)`.
+  - Feito:
+    - `fit_mlx_context_budget_to_memory()` calcula `kv_budget_tokens`;
+    - caminhos MLX sequencial e batch substituem `max_kv_size` pelo contexto
+      efetivo que cabe antes de criar o cache;
+    - `max_tokens` e `max_kv_size` sao ajustados juntos;
+    - logs incluem `requested_context`, `fitted_context` e
+      `kv_budget_tokens`.
+
+- [ ] Degradar contexto antes de falhar.
+  - Se `prompt + max_tokens` nao couber:
+    - reduzir `max_tokens`;
+    - se ainda nao couber, reduzir contexto efetivo;
+    - se prompt exceder contexto efetivo, aplicar truncamento controlado quando
+      permitido.
+  - Erro so deve acontecer quando nao ha politica segura para truncar o prompt.
+
+- [ ] Implementar slots/conversas para KV prefix cache.
+  - Similar ao conceito de slot do `llama.cpp/server`.
+  - Cada conversa/request recorrente deve ter budget proprio.
+  - Deve ser possivel remover KV de uma conversa sem matar o modelo.
+
+- [ ] Implementar context shifting/truncamento tipo llama.cpp.
+  - Manter system/developer prompt e ultimas mensagens.
+  - Remover mensagens antigas antes do prefill quando o prompt nao cabe.
+  - Logar exatamente quantos tokens foram mantidos/removidos.
+
+- [ ] Implementar eviction de KV por VRAM, nao RAM.
+  - Prefix cache deve ter orcamento explicito em bytes/tokens/entradas.
+  - Evict antes de alocar novo cache.
+  - Nao salvar cache novo se a VRAM estiver acima do limite.
+
+- [ ] Adicionar telemetria equivalente ou melhor que llama.cpp.
+  - Logs por request:
+    - `n_ctx_requested`;
+    - `n_ctx_model`;
+    - `n_ctx_effective`;
+    - `prompt_tokens`;
+    - `max_tokens_requested`;
+    - `max_tokens_effective`;
+    - `kv_estimated_bytes`;
+    - `kv_budget_bytes`;
+    - `truncated_tokens`;
+    - `prefix_cache_hit`.
+
+- [ ] Resultado esperado.
+  - Para clientes como Hermes/OpenWebUI:
+    - `/v1/models` lista apenas modelos utilizaveis;
+    - contexto pedido e respeitado ate onde couber;
+    - Exo reduz/degrada antes de OOM;
+    - conversa longa nao deve matar runner;
+    - limpar conversa nao deve matar modelo.
 
 - [ ] Implementar truncamento opcional de mensagens.
   - Campo sugerido:
