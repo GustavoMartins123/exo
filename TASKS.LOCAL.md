@@ -168,6 +168,15 @@ Hoje o comportamento ruim observado e:
         `effective_context_length`, `max_model_len` e `quantization`;
       - o catalogo completo continua em `/models` e tambem foi exposto como
         `/models/catalog`.
+    - inspirado no gerenciamento de memoria do `llama.cpp`, o caminho MLX agora
+      faz preflight de orcamento de KV cache antes de `make_kv_cache`/prefill:
+      - estima tokens totais (`prompt + max_tokens`);
+      - usa numero de camadas locais do shard carregado;
+      - estima largura de KV por `n_kv_heads * head_dim` quando disponivel;
+      - compara com VRAM livre da GPU visivel via NVML;
+      - rejeita a request com erro claro antes de deixar CUDA/MLX morrer por
+        OOM;
+      - loga `generation_memory_budget` com estimativa, VRAM livre e reserva.
   - Observacao:
     - isso limita o contexto dinamico por request; redistribuicao proporcional
       de KV/cache entre GPUs continua na prioridade 5.

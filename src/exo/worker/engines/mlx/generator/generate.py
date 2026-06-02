@@ -60,7 +60,10 @@ from exo.worker.engines.mlx.context_limits import (
     validate_generation_context,
 )
 from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
-from exo.worker.engines.mlx.memory import log_generation_memory
+from exo.worker.engines.mlx.memory import (
+    enforce_mlx_memory_budget,
+    log_generation_memory,
+)
 from exo.worker.engines.mlx.types import KVCacheType, Model
 from exo.worker.engines.mlx.utils_mlx import (
     apply_chat_template,
@@ -584,6 +587,12 @@ def mlx_generate(
     validate_generation_context(task, len(all_prompt_tokens))
     max_kv_size = effective_context_limit(task)
     max_tokens = effective_max_output_tokens(task, len(all_prompt_tokens))
+    enforce_mlx_memory_budget(
+        task,
+        model,
+        prompt_tokens=len(all_prompt_tokens),
+        max_output_tokens=max_tokens,
+    )
 
     # Do not use the prefix cache if we are trying to do benchmarks.
     is_bench = task.bench
