@@ -118,7 +118,7 @@ Hoje o comportamento ruim observado e:
 
 ## Prioridade 2 - Limites reais de contexto e preflight
 
-- [ ] Adicionar limite de prompt por request no tipo de API.
+- [x] Adicionar limite de prompt/contexto por request no tipo de API.
   - Arquivos:
     - `src/exo/api/types/api.py`
     - `src/exo/shared/types/text_generation.py`
@@ -127,13 +127,32 @@ Hoje o comportamento ruim observado e:
     - `max_prompt_tokens: int | None`
   - Variavel de ambiente sugerida:
     - `EXO_MAX_PROMPT_TOKENS`
+  - Feito:
+    - `ChatCompletionRequest` aceita `max_context_tokens`, `context_length`,
+      `n_ctx`, `max_model_len` e `max_prompt_tokens`;
+    - `TextGenerationTaskParams` propaga `max_context_tokens` e
+      `max_prompt_tokens`;
+    - `/v1/models` expoe `effective_context_length` e `context_limit_source`
+      para diagnostico.
 
-- [ ] Fazer preflight antes de carregar o prompt na GPU.
+- [x] Fazer preflight antes de carregar o prompt na GPU.
   - Tokenizar primeiro.
   - Se `prompt_tokens + max_output_tokens` exceder limite configurado:
     - retornar erro claro;
     - nao iniciar prefill;
     - nao alocar KV cache.
+  - Feito:
+    - `src/exo/worker/engines/mlx/context_limits.py`;
+    - caminhos MLX sequencial e batch validam apos tokenizar/aplicar vision e
+      antes de `make_kv_cache`/`prefill`;
+    - limite total usa: request, `EXO_MAX_CONTEXT_TOKENS`, depois
+      `ModelCard.context_length`;
+    - limite de prompt usa: request, depois `EXO_MAX_PROMPT_TOKENS`;
+    - docs recomendam `EXO_MAX_CONTEXT_TOKENS=32768` para cluster misto com
+      GPUs de 12 GB.
+  - Observacao:
+    - isso limita o contexto dinamico por request; redistribuicao proporcional
+      de KV/cache entre GPUs continua na prioridade 5.
 
 - [ ] Implementar truncamento opcional de mensagens.
   - Campo sugerido:

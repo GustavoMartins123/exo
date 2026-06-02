@@ -3,7 +3,7 @@ from collections.abc import Generator
 from typing import Annotated, Any, Literal, get_args
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 from exo.shared.models.model_cards import ModelCard, ModelId
 from exo.shared.types.common import CommandId, NodeId
@@ -39,6 +39,8 @@ class ModelListModel(BaseModel):
     name: str = Field(default="")
     description: str = Field(default="")
     context_length: int = Field(default=0)
+    effective_context_length: int = Field(default=0)
+    context_limit_source: str = Field(default="model_card")
     tags: list[str] = Field(default=[])
     storage_size_megabytes: int = Field(default=0)
     supports_tensor: bool = Field(default=False)
@@ -222,6 +224,13 @@ class ChatCompletionRequest(BaseModel):
     temperature: float | None = None
     top_p: float | None = None
     top_k: int | None = None
+    max_context_tokens: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "max_context_tokens", "context_length", "n_ctx", "max_model_len"
+        ),
+    )
+    max_prompt_tokens: int | None = None
     tools: list[dict[str, Any]] | None = None
     reasoning_effort: ReasoningEffort | None = None
     enable_thinking: bool | None = None

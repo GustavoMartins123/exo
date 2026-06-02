@@ -33,6 +33,7 @@ from exo.worker.engines.mlx.cache import (
     make_kv_cache,
 )
 from exo.worker.engines.mlx.constants import DEFAULT_TOP_LOGPROBS, MAX_TOKENS
+from exo.worker.engines.mlx.context_limits import validate_generation_context
 from exo.worker.engines.mlx.generator.generate import (
     ban_token_ids,
     eos_ids_from_tokenizer,
@@ -159,6 +160,7 @@ class ExoBatchGenerator:
         if vision is not None:
             all_prompt_tokens = vision.prompt_tokens
             media_regions = vision.media_regions
+        validate_generation_context(task_params, len(all_prompt_tokens))
 
         is_bench = task_params.bench
 

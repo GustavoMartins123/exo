@@ -276,7 +276,23 @@ Common missing library errors:
 - `No module named 'torch'`: run `uv sync --extra mlx-cuda13` or install torch
   with `uv pip install`.
 
-## 7. Hugging Face Login
+## 7. Set a Safe Context Limit
+
+On mixed NVIDIA clusters with 12 GB cards, keep the dynamic request context
+below the model card maximum. This prevents long prefill/KV cache allocations
+from concentrating on a small GPU:
+
+```bash
+echo 'export EXO_MAX_CONTEXT_TOKENS=32768' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Per-request OpenAI-compatible overrides are also accepted:
+`max_context_tokens`, `context_length`, `n_ctx`, or `max_model_len`.
+The server rejects `prompt_tokens + max_tokens` before prefill when the request
+exceeds the effective limit.
+
+## 8. Hugging Face Login
 
 Create a read token at:
 
@@ -300,7 +316,7 @@ uv run --extra mlx-cuda13 hf auth login --token 'hf_xxx'
 
 Do not save tokens in the repo.
 
-## 8. Download Model Manually
+## 9. Download Model Manually
 
 The exo dashboard may stay at `Preparing download...` while the backend only
 shows `DownloadPending`. The reliable path is to download directly with the
@@ -322,7 +338,7 @@ Monitor size:
 watch -n 5 'du -sh ~/.local/share/exo/models/mlx-community--Qwen3.6-35B-A3B-4bit'
 ```
 
-## 9. Start exo Cluster
+## 10. Start exo Cluster
 
 Install `tmux` if it was not installed with the base packages:
 
@@ -393,7 +409,7 @@ EXO_LIBP2P_NAMESPACE=my-cluster uv run --extra mlx-cuda13 exo -v \
   --bootstrap-peers /ip4/MACHINE_1_IP/tcp/30000
 ```
 
-## 10. Create Instance From API
+## 11. Create Instance From API
 
 Preview valid placements:
 
@@ -417,7 +433,7 @@ curl -X POST http://localhost:52415/instance \
   -d "{\"instance\":$INSTANCE}"
 ```
 
-## 11. Useful Checks
+## 12. Useful Checks
 
 Downloaded status for one model:
 
@@ -462,7 +478,7 @@ GPU status:
 nvidia-smi
 ```
 
-## 12. Notes
+## 13. Notes
 
 - `nvidia-smi` showing CUDA 13.x only means the driver supports CUDA 13.x. It
   does not mean cuBLAS, NVRTC, or CUDA headers are installed.

@@ -110,6 +110,8 @@ class TextGenerationTaskParams(BaseModel, frozen=True):
     input: list[InputMessage]
     instructions: InputMessageContent | None = None
     max_output_tokens: int | None = None
+    max_context_tokens: int | None = None
+    max_prompt_tokens: int | None = None
     temperature: float | None = None
     top_p: float | None = None
     stream: bool = False

@@ -253,6 +253,8 @@ Executes a chat completion request using an OpenAI-compatible schema. Supports s
 * `messages`: array, required - Conversation messages
 * `stream`: boolean (default: false) - Enable streaming responses
 * `max_tokens`: integer (optional) - Maximum tokens to generate
+* `max_context_tokens`: integer (optional) - Maximum total context budget for this request (`prompt_tokens + max_tokens`). Aliases accepted: `context_length`, `n_ctx`, `max_model_len`.
+* `max_prompt_tokens`: integer (optional) - Maximum prompt tokens allowed before generation.
 * `temperature`: float (optional) - Sampling temperature
 * `top_p`: float (optional) - Nucleus sampling parameter
 * `top_k`: integer (optional) - Top-k sampling parameter

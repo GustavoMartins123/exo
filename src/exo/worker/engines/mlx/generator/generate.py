@@ -55,6 +55,7 @@ from exo.worker.engines.mlx.constants import (
     KV_GROUP_SIZE,
     MAX_TOKENS,
 )
+from exo.worker.engines.mlx.context_limits import validate_generation_context
 from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
 from exo.worker.engines.mlx.memory import log_generation_memory
 from exo.worker.engines.mlx.types import KVCacheType, Model
@@ -577,6 +578,7 @@ def mlx_generate(
     if vision is not None:
         all_prompt_tokens = vision.prompt_tokens
     media_regions: list[MediaRegion] = vision.media_regions if vision else []
+    validate_generation_context(task, len(all_prompt_tokens))
 
     # Do not use the prefix cache if we are trying to do benchmarks.
     is_bench = task.bench
