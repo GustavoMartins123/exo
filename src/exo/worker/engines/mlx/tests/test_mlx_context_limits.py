@@ -1,5 +1,6 @@
 import pytest
 
+from exo.shared.models import model_cards
 from exo.shared.models.model_cards import ModelId
 from exo.shared.types.text_generation import (
     InputMessage,
@@ -18,7 +19,20 @@ def _task(**updates: object) -> TextGenerationTaskParams:
     return TextGenerationTaskParams.model_validate(params)
 
 
-def test_rejects_request_when_prompt_and_output_exceed_context() -> None:
+class _FakeModelCard:
+    def __init__(self, context_length: int) -> None:
+        self.context_length = context_length
+
+
+def _fake_card_65536(_model_id: ModelId) -> _FakeModelCard:
+    return _FakeModelCard(context_length=65536)
+
+
+def _fake_card_131072(_model_id: ModelId) -> _FakeModelCard:
+    return _FakeModelCard(context_length=131072)
+
+
+def test_rejects_request_when_prompt_and_output_exceed_request_context() -> None:
     with pytest.raises(ValueError, match="max_context_tokens=32768"):
         validate_generation_context(
             _task(max_context_tokens=32768, max_output_tokens=512),
@@ -41,25 +55,32 @@ def test_rejects_prompt_above_prompt_limit() -> None:
         )
 
 
-def test_env_context_limit_rejects_total_tokens(
+def test_model_context_caps_larger_request_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("EXO_MAX_CONTEXT_TOKENS", "32768")
+    monkeypatch.setattr(
+        model_cards.card_cache,
+        "get",
+        _fake_card_65536,
+    )
 
-    with pytest.raises(ValueError, match="max_context_tokens=32768"):
+    with pytest.raises(ValueError, match="max_context_tokens=65536"):
         validate_generation_context(
-            _task(max_output_tokens=512),
-            prompt_tokens=32500,
+            _task(max_context_tokens=131072, max_output_tokens=1024),
+            prompt_tokens=65000,
         )
 
 
-def test_env_prompt_limit_rejects_prompt_only(
+def test_larger_request_context_is_accepted_when_model_supports_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("EXO_MAX_PROMPT_TOKENS", "16000")
+    monkeypatch.setattr(
+        model_cards.card_cache,
+        "get",
+        _fake_card_131072,
+    )
 
-    with pytest.raises(ValueError, match="max_prompt_tokens=16000"):
-        validate_generation_context(
-            _task(max_context_tokens=32768, max_output_tokens=1),
-            prompt_tokens=16001,
-        )
+    validate_generation_context(
+        _task(max_context_tokens=131072, max_output_tokens=1024),
+        prompt_tokens=65000,
+    )

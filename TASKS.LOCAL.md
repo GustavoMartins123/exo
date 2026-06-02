@@ -125,8 +125,6 @@ Hoje o comportamento ruim observado e:
     - `src/exo/api/adapters/chat_completions.py`
   - Campo sugerido:
     - `max_prompt_tokens: int | None`
-  - Variavel de ambiente sugerida:
-    - `EXO_MAX_PROMPT_TOKENS`
   - Feito:
     - `ChatCompletionRequest` aceita `max_context_tokens`, `context_length`,
       `n_ctx`, `max_model_len` e `max_prompt_tokens`;
@@ -145,11 +143,12 @@ Hoje o comportamento ruim observado e:
     - `src/exo/worker/engines/mlx/context_limits.py`;
     - caminhos MLX sequencial e batch validam apos tokenizar/aplicar vision e
       antes de `make_kv_cache`/`prefill`;
-    - limite total usa: request, `EXO_MAX_CONTEXT_TOKENS`, depois
+    - limite total efetivo e o menor valor entre request e
       `ModelCard.context_length`;
-    - limite de prompt usa: request, depois `EXO_MAX_PROMPT_TOKENS`;
-    - docs recomendam `EXO_MAX_CONTEXT_TOKENS=32768` para cluster misto com
-      GPUs de 12 GB.
+    - se a request nao trouxer limite, usa `ModelCard.context_length`;
+    - limite de prompt usa `max_prompt_tokens` da request;
+    - docs explicam que `context_length`, `n_ctx` e `max_model_len` vindos do
+      provider sao respeitados por request.
   - Observacao:
     - isso limita o contexto dinamico por request; redistribuicao proporcional
       de KV/cache entre GPUs continua na prioridade 5.

@@ -1,37 +1,23 @@
-import os
-
 from exo.shared.models import model_cards
 from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.worker.engines.mlx.constants import MAX_TOKENS
 
-_CONTEXT_ENV_VAR = "EXO_MAX_CONTEXT_TOKENS"
-_PROMPT_ENV_VAR = "EXO_MAX_PROMPT_TOKENS"
-
-
-def _positive_int_from_env(name: str) -> int | None:
-    raw = os.environ.get(name)
-    if raw is None or raw == "":
-        return None
-    try:
-        value = int(raw)
-    except ValueError:
-        raise ValueError(f"{name} must be an integer, got {raw!r}") from None
-    if value <= 0:
-        raise ValueError(f"{name} must be greater than zero, got {value}")
-    return value
-
 
 def effective_context_limit(task: TextGenerationTaskParams) -> int | None:
-    if task.max_context_tokens is not None:
-        return task.max_context_tokens
-
-    if (value := _positive_int_from_env(_CONTEXT_ENV_VAR)) is not None:
-        return value
-
     card = model_cards.card_cache.get(task.model)
-    if card is None or card.context_length <= 0:
-        return None
-    return card.context_length
+    model_context_limit = (
+        card.context_length if card is not None and card.context_length > 0 else None
+    )
+
+    if task.max_context_tokens is None:
+        return model_context_limit
+    if task.max_context_tokens <= 0:
+        raise ValueError(
+            f"max_context_tokens must be greater than zero, got {task.max_context_tokens}"
+        )
+    if model_context_limit is None:
+        return task.max_context_tokens
+    return min(task.max_context_tokens, model_context_limit)
 
 
 def validate_generation_context(
@@ -39,9 +25,10 @@ def validate_generation_context(
     prompt_tokens: int,
 ) -> None:
     prompt_limit = task.max_prompt_tokens
-    if prompt_limit is None:
-        prompt_limit = _positive_int_from_env(_PROMPT_ENV_VAR)
-
+    if prompt_limit is not None and prompt_limit <= 0:
+        raise ValueError(
+            f"max_prompt_tokens must be greater than zero, got {prompt_limit}"
+        )
     if prompt_limit is not None and prompt_tokens > prompt_limit:
         raise ValueError(
             "Prompt token count exceeds configured limit: "

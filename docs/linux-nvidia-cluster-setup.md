@@ -276,21 +276,14 @@ Common missing library errors:
 - `No module named 'torch'`: run `uv sync --extra mlx-cuda13` or install torch
   with `uv pip install`.
 
-## 7. Set a Safe Context Limit
+## 7. Request Context Limits
 
-On mixed NVIDIA clusters with 12 GB cards, keep the dynamic request context
-below the model card maximum. This prevents long prefill/KV cache allocations
-from concentrating on a small GPU:
-
-```bash
-echo 'export EXO_MAX_CONTEXT_TOKENS=32768' >> ~/.bashrc
-source ~/.bashrc
-```
-
-Per-request OpenAI-compatible overrides are also accepted:
+The OpenAI-compatible endpoint accepts per-request context limits:
 `max_context_tokens`, `context_length`, `n_ctx`, or `max_model_len`.
-The server rejects `prompt_tokens + max_tokens` before prefill when the request
-exceeds the effective limit.
+
+The effective context limit is the smaller value between the request limit and
+the model card context length. The server rejects `prompt_tokens + max_tokens`
+before prefill when the request exceeds that effective limit.
 
 ## 8. Hugging Face Login
 

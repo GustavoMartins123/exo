@@ -2,7 +2,6 @@ import base64
 import contextlib
 import hashlib
 import json
-import os
 import random
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable
@@ -210,21 +209,6 @@ from exo.utils.task_group import TaskGroup
 
 _API_EVENT_LOG_DIR = EXO_EVENT_LOG_DIR / "api"
 ONBOARDING_COMPLETE_FILE = EXO_CACHE_HOME / "onboarding_complete"
-_CONTEXT_ENV_VAR = "EXO_MAX_CONTEXT_TOKENS"
-
-
-def _effective_context_limit(card_context_length: int) -> tuple[int, str]:
-    raw = os.environ.get(_CONTEXT_ENV_VAR)
-    if raw is not None and raw != "":
-        with contextlib.suppress(ValueError):
-            value = int(raw)
-            if value > 0:
-                return (
-                    min(card_context_length, value)
-                    if card_context_length > 0
-                    else value
-                ), _CONTEXT_ENV_VAR
-    return card_context_length, "model_card"
 
 
 def _format_to_content_type(image_format: Literal["png", "jpeg", "webp"] | None) -> str:
@@ -1827,13 +1811,10 @@ class API:
                     capabilities=card.capabilities,
                     reasoning_dialect=card.reasoning_dialect,
                     context_length=card.context_length,
-                    effective_context_length=effective_context_length,
-                    context_limit_source=context_limit_source,
+                    effective_context_length=card.context_length,
+                    context_limit_source="model_card",
                 )
                 for card in cards
-                for effective_context_length, context_limit_source in [
-                    _effective_context_limit(card.context_length)
-                ]
             ]
         )
 
@@ -1857,9 +1838,6 @@ class API:
         # returns the new model without waiting for the event round-trip.
         model_cards.card_cache.cc[card.model_id] = card
 
-        effective_context_length, context_limit_source = _effective_context_limit(
-            card.context_length
-        )
         return ModelListModel(
             id=card.model_id,
             hugging_face_id=card.model_id,
@@ -1871,8 +1849,8 @@ class API:
             tasks=[task.value for task in card.tasks],
             is_custom=True,
             context_length=card.context_length,
-            effective_context_length=effective_context_length,
-            context_limit_source=context_limit_source,
+            effective_context_length=card.context_length,
+            context_limit_source="model_card",
         )
 
     async def delete_custom_model(self, model_id: ModelId) -> JSONResponse:
