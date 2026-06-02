@@ -235,6 +235,10 @@ class ChatCompletionRequest(BaseModel):
     )
     max_prompt_tokens: int | None = None
     truncation: Literal["error", "drop_oldest"] = "drop_oldest"
+    cache_slot: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("cache_slot", "conversation_id", "session_id"),
+    )
     tools: list[dict[str, Any]] | None = None
     reasoning_effort: ReasoningEffort | None = None
     enable_thinking: bool | None = None

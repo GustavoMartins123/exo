@@ -222,6 +222,7 @@ class ExoBatchGenerator:
                     all_prompt_tokens,
                     media_regions=media_regions,
                     max_kv_size=max_kv_size,
+                    cache_slot=task_params.cache_slot,
                 )
             )
             prefix_hit_length = len(all_prompt_tokens) - len(remaining_tokens)
@@ -365,6 +366,7 @@ class ExoBatchGenerator:
                 matched_index,
                 min_prefix_hit_length,
                 media_regions,
+                cache_slot=task_params.cache_slot,
                 prefill_tps=_prefill_tps,
             )
             log_generation_memory(
@@ -601,6 +603,7 @@ class ExoBatchGenerator:
         matched_index: int | None,
         min_prefix_hit_length: int = 1000,
         media_regions: list[MediaRegion] | None = None,
+        cache_slot: str | None = None,
         prefill_tps: float = 0.0,
     ) -> None:
         if self.kv_prefix_cache is None:
@@ -623,6 +626,7 @@ class ExoBatchGenerator:
                     cache_snapshots,
                     restore_pos=prefix_hit_length,
                     media_regions=media_regions,
+                    cache_slot=cache_slot,
                     prefill_tps=prefill_tps,
                 )
             else:
@@ -631,6 +635,7 @@ class ExoBatchGenerator:
                     cache,
                     cache_snapshots,
                     media_regions=media_regions,
+                    cache_slot=cache_slot,
                     prefill_tps=prefill_tps,
                 )
         except Exception:

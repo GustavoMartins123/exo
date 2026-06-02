@@ -38,3 +38,18 @@ async def test_chat_completion_accepts_truncation_policy() -> None:
     params = await chat_request_to_text_generation(request)
 
     assert params.truncation == "error"
+
+
+@pytest.mark.anyio
+async def test_chat_completion_accepts_cache_slot_alias() -> None:
+    request = ChatCompletionRequest.model_validate(
+        {
+            "model": "mlx-community/Qwen3.6-27B-4bit",
+            "messages": [{"role": "user", "content": "hi"}],
+            "conversation_id": "hermes-session-1",
+        }
+    )
+
+    params = await chat_request_to_text_generation(request)
+
+    assert params.cache_slot == "hermes-session-1"

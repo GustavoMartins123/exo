@@ -642,6 +642,7 @@ def mlx_generate(
                 all_prompt_tokens,
                 media_regions=media_regions,
                 max_kv_size=max_kv_size,
+                cache_slot=task.cache_slot,
             )
         )
         prefix_hit_length = len(all_prompt_tokens) - len(prompt_tokens)
@@ -784,6 +785,7 @@ def mlx_generate(
                 cache_snapshots,
                 restore_pos=prefix_hit_length,
                 media_regions=media_regions,
+                cache_slot=task.cache_slot,
                 prefill_tps=prefill_tps,
             )
         else:
@@ -792,6 +794,7 @@ def mlx_generate(
                 caches,
                 cache_snapshots,
                 media_regions=media_regions,
+                cache_slot=task.cache_slot,
                 prefill_tps=prefill_tps,
             )
         log_generation_memory(

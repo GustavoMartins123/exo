@@ -223,6 +223,18 @@ Hoje o comportamento ruim observado e:
   - Similar ao conceito de slot do `llama.cpp/server`.
   - Cada conversa/request recorrente deve ter budget proprio.
   - Deve ser possivel remover KV de uma conversa sem matar o modelo.
+  - Em andamento:
+    - `ChatCompletionRequest` aceita `cache_slot`, `conversation_id` e
+      `session_id`;
+    - se nao vier slot explicito, usa `user` como fallback;
+    - `TextGenerationTaskParams` propaga `cache_slot`;
+    - `KVPrefixCache` armazena slot por entrada;
+    - busca/update/add de prefix cache agora ficam isolados por slot;
+    - `KVPrefixCache.clear_slot()` remove entradas de um slot localmente.
+  - Falta:
+    - comando/API para limpar slot no runner sem matar modelo;
+    - budget por slot;
+    - telemetria por slot.
 
 - [ ] Implementar context shifting/truncamento tipo llama.cpp.
   - Manter system/developer prompt e ultimas mensagens.

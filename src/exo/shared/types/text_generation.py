@@ -114,6 +114,7 @@ class TextGenerationTaskParams(BaseModel, frozen=True):
     max_context_tokens: int | None = None
     max_prompt_tokens: int | None = None
     truncation: TruncationPolicy = "drop_oldest"
+    cache_slot: str | None = None
     temperature: float | None = None
     top_p: float | None = None
     stream: bool = False

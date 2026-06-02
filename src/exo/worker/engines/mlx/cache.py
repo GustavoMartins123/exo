@@ -235,6 +235,7 @@ class KVPrefixCache:
         self.caches: list[KVCacheType] = []
         self._snapshots: list[list[CacheSnapshot] | None] = []
         self._media_regions: list[list["MediaRegion"]] = []
+        self._cache_slots: list[str | None] = []
         self._last_used: list[int] = []  # monotonic counter of last access per entry
         self.prefill_tps: list[float] = []
         self._access_counter: int = 0
@@ -246,8 +247,28 @@ class KVPrefixCache:
         self.caches.clear()
         self._snapshots.clear()
         self._media_regions.clear()
+        self._cache_slots.clear()
         self._last_used.clear()
         self.prefill_tps.clear()
+
+    def clear_slot(self, cache_slot: str | None) -> int:
+        """Clear cached prompts and caches for one conversation slot."""
+        removed = 0
+        for index in reversed(range(len(self._cache_slots))):
+            if self._cache_slots[index] != cache_slot:
+                continue
+            self.prompts.pop(index)
+            self.caches.pop(index)
+            self._snapshots.pop(index)
+            self._media_regions.pop(index)
+            self._cache_slots.pop(index)
+            self._last_used.pop(index)
+            self.prefill_tps.pop(index)
+            removed += 1
+        if removed > 0:
+            gc.collect()
+            mx.clear_cache()
+        return removed
 
     def add_kv_cache(
         self,
@@ -255,6 +276,7 @@ class KVPrefixCache:
         cache: KVCacheType,
         ssm_snapshots: list[CacheSnapshot] | None = None,
         media_regions: list["MediaRegion"] | None = None,
+        cache_slot: str | None = None,
         prefill_tps: float = 0.0,
     ):
         """Add a new cache entry. Evicts LRU entries if memory is high."""
@@ -263,10 +285,11 @@ class KVPrefixCache:
         self.caches.append(deepcopy(cache))
         self._snapshots.append(ssm_snapshots)
         self._media_regions.append(media_regions or [])
+        self._cache_slots.append(cache_slot)
         self.prefill_tps.append(prefill_tps)
         self._access_counter += 1
         self._last_used.append(self._access_counter)
-        logger.info(f"KV cache added: {len(prompt_tokens)} tokens")
+        logger.info(f"KV cache added: {len(prompt_tokens)} tokens slot={cache_slot}")
 
     def update_kv_cache(
         self,
@@ -276,6 +299,7 @@ class KVPrefixCache:
         snapshots: list[CacheSnapshot] | None,
         restore_pos: int,
         media_regions: list["MediaRegion"] | None = None,
+        cache_slot: str | None = None,
         prefill_tps: float = 0.0,
     ):
         """Update an existing cache entry in-place."""
@@ -290,10 +314,14 @@ class KVPrefixCache:
         self.caches[index] = deepcopy(cache)
         self._snapshots[index] = merged or None
         self._media_regions[index] = media_regions or []
+        self._cache_slots[index] = cache_slot
         self.prefill_tps[index] = prefill_tps
         self._access_counter += 1
         self._last_used[index] = self._access_counter
-        logger.info(f"KV cache updated (index {index}): {len(prompt_tokens)} tokens")
+        logger.info(
+            f"KV cache updated (index {index}): {len(prompt_tokens)} tokens "
+            f"slot={cache_slot}"
+        )
 
     def _get_snapshot(
         self, entry_index: int, target_token_count: int
@@ -317,6 +345,7 @@ class KVPrefixCache:
         prompt_tokens: mx.array,
         media_regions: list["MediaRegion"] | None = None,
         max_kv_size: int | None = None,
+        cache_slot: str | None = None,
     ) -> tuple[KVCacheType, mx.array, int | None, bool]:
         """Get KV cache for prompt, returning remaining tokens to prefill.
 
@@ -344,6 +373,8 @@ class KVPrefixCache:
 
         # Find best cache match
         for i, cached_prompt in enumerate(self.prompts):
+            if self._cache_slots[i] != cache_slot:
+                continue
             length = get_prefix_length(prompt_tokens, cached_prompt)
             if length > 0:
                 length = self._validate_media_match(
@@ -444,6 +475,7 @@ class KVPrefixCache:
             self.caches.pop(lru_index)
             self._snapshots.pop(lru_index)
             self._media_regions.pop(lru_index)
+            self._cache_slots.pop(lru_index)
             self._last_used.pop(lru_index)
             self.prefill_tps.pop(lru_index)
 
