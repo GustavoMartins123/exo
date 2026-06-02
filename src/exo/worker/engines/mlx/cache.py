@@ -1,7 +1,7 @@
 import gc
 import os
 from copy import deepcopy
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import mlx.core as mx
 import numpy as np
@@ -316,6 +316,7 @@ class KVPrefixCache:
         model: Model,
         prompt_tokens: mx.array,
         media_regions: list["MediaRegion"] | None = None,
+        max_kv_size: int | None = None,
     ) -> tuple[KVCacheType, mx.array, int | None, bool]:
         """Get KV cache for prompt, returning remaining tokens to prefill.
 
@@ -358,7 +359,7 @@ class KVPrefixCache:
                 best_index, best_length = i, length
 
         if best_index is None:
-            return make_kv_cache(model), prompt_tokens, None, False
+            return make_kv_cache(model, max_kv_size=max_kv_size), prompt_tokens, None, False
 
         # For exact match: trim to max_length-1 so remaining has the last token
         # For partial match: trim to best_length, remaining has suffix to prefill
@@ -374,7 +375,7 @@ class KVPrefixCache:
 
         # No usable snapshot — need fresh cache
         if restore_snap is None and has_ssm:
-            return make_kv_cache(model), prompt_tokens, None, False
+            return make_kv_cache(model, max_kv_size=max_kv_size), prompt_tokens, None, False
 
         prompt_cache = deepcopy(self.caches[best_index])
         tokens_to_trim = cached_length - restore_pos
@@ -535,6 +536,28 @@ def cache_length(cache: KVCacheType) -> int:
     return max((_entry_length(c) for c in cache), default=0)
 
 
+def _clamp_rotating_cache(cache: RotatingKVCache, max_kv_size: int) -> None:
+    if cache.max_size <= max_kv_size:
+        return
+    logger.info(f"Clamping rotating KV cache from {cache.max_size} to {max_kv_size}")
+    cache.max_size = max_kv_size
+
+
+def clamp_kv_cache_max_size(cache: KVCacheType, max_kv_size: int | None) -> None:
+    if max_kv_size is None:
+        return
+
+    for entry in cache:
+        if isinstance(entry, RotatingKVCache):
+            _clamp_rotating_cache(entry, max_kv_size)
+        elif isinstance(entry, CacheList):
+            for inner in entry:  # type: ignore[reportUnknownVariableType]
+                if isinstance(inner, RotatingKVCache):
+                    _clamp_rotating_cache(inner, max_kv_size)
+        elif isinstance(entry, DeepseekV4Cache):
+            _clamp_rotating_cache(entry.local, max_kv_size)
+
+
 def get_prefix_length(prompt: mx.array, cached_prompt: mx.array) -> int:
     """Find the length of the common prefix between two token arrays."""
     n = min(int(prompt.shape[0]), int(cached_prompt.shape[0]))
@@ -564,7 +587,9 @@ def make_kv_cache(
 
     if hasattr(model, "make_cache"):
         logger.info("Using MLX LM's make cache")
-        return model.make_cache()  # type: ignore
+        cache = cast(KVCacheType, model.make_cache())  # type: ignore
+        clamp_kv_cache_max_size(cache, max_kv_size)
+        return cache
 
     if max_kv_size is None:
         if KV_CACHE_BITS is None:

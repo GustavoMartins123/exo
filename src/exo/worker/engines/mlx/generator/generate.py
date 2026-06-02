@@ -55,7 +55,10 @@ from exo.worker.engines.mlx.constants import (
     KV_GROUP_SIZE,
     MAX_TOKENS,
 )
-from exo.worker.engines.mlx.context_limits import validate_generation_context
+from exo.worker.engines.mlx.context_limits import (
+    effective_context_limit,
+    validate_generation_context,
+)
 from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
 from exo.worker.engines.mlx.memory import log_generation_memory
 from exo.worker.engines.mlx.types import KVCacheType, Model
@@ -579,6 +582,7 @@ def mlx_generate(
         all_prompt_tokens = vision.prompt_tokens
     media_regions: list[MediaRegion] = vision.media_regions if vision else []
     validate_generation_context(task, len(all_prompt_tokens))
+    max_kv_size = effective_context_limit(task)
 
     # Do not use the prefix cache if we are trying to do benchmarks.
     is_bench = task.bench
@@ -590,12 +594,15 @@ def mlx_generate(
     matched_index: int | None = None
     is_exact_hit = False
     if kv_prefix_cache is None:
-        caches = make_kv_cache(model=model)
+        caches = make_kv_cache(model=model, max_kv_size=max_kv_size)
         prompt_tokens = all_prompt_tokens
     else:
         caches, prompt_tokens, matched_index, is_exact_hit = (
             kv_prefix_cache.get_kv_cache(
-                model, all_prompt_tokens, media_regions=media_regions
+                model,
+                all_prompt_tokens,
+                media_regions=media_regions,
+                max_kv_size=max_kv_size,
             )
         )
         prefix_hit_length = len(all_prompt_tokens) - len(prompt_tokens)

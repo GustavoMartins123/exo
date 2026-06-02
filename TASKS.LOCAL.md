@@ -148,7 +148,10 @@ Hoje o comportamento ruim observado e:
     - se a request nao trouxer limite, usa `ModelCard.context_length`;
     - limite de prompt usa `max_prompt_tokens` da request;
     - docs explicam que `context_length`, `n_ctx` e `max_model_len` vindos do
-      provider sao respeitados por request.
+      provider sao respeitados por request;
+    - `make_kv_cache` agora reduz `RotatingKVCache.max_size` para o limite
+      efetivo da request/modelo, inclusive em caches criados por
+      `model.make_cache()`.
   - Observacao:
     - isso limita o contexto dinamico por request; redistribuicao proporcional
       de KV/cache entre GPUs continua na prioridade 5.
