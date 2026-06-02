@@ -11,6 +11,7 @@ import mlx.core as mx
 
 from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.worker.engines.mlx.constants import MAX_TOKENS
+from exo.worker.engines.mlx.context_limits import effective_max_output_tokens
 from exo.worker.runner.bootstrap import logger
 
 if TYPE_CHECKING:
@@ -118,7 +119,11 @@ def log_generation_memory(
     prefix_hit_length: int | None = None,
     prefix_cache_hit: str | None = None,
 ) -> None:
-    max_output_tokens = task.max_output_tokens or MAX_TOKENS
+    max_output_tokens = (
+        effective_max_output_tokens(task, prompt_tokens)
+        if prompt_tokens is not None
+        else task.max_output_tokens or MAX_TOKENS
+    )
     fields = [
         f"stage={stage}",
         f"model={task.model}",

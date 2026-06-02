@@ -7,7 +7,10 @@ from exo.shared.types.text_generation import (
     InputMessageContent,
     TextGenerationTaskParams,
 )
-from exo.worker.engines.mlx.context_limits import validate_generation_context
+from exo.worker.engines.mlx.context_limits import (
+    effective_max_output_tokens,
+    validate_generation_context,
+)
 
 
 def _task(**updates: object) -> TextGenerationTaskParams:
@@ -45,6 +48,30 @@ def test_accepts_request_inside_provider_context() -> None:
         _task(max_context_tokens=32768, max_output_tokens=512),
         prompt_tokens=32000,
     )
+
+
+def test_default_output_tokens_are_conservative_when_request_omits_max_tokens() -> None:
+    assert (
+        effective_max_output_tokens(
+            _task(max_context_tokens=32768),
+            prompt_tokens=1000,
+        )
+        == 1024
+    )
+
+
+def test_default_output_tokens_are_clamped_to_remaining_context() -> None:
+    task = _task(max_context_tokens=32768)
+
+    assert effective_max_output_tokens(task, prompt_tokens=32000) == 768
+    validate_generation_context(task, prompt_tokens=32000)
+
+
+def test_explicit_output_tokens_are_respected_inside_context() -> None:
+    task = _task(max_context_tokens=32768, max_output_tokens=4096)
+
+    assert effective_max_output_tokens(task, prompt_tokens=1000) == 4096
+    validate_generation_context(task, prompt_tokens=1000)
 
 
 def test_rejects_prompt_above_prompt_limit() -> None:

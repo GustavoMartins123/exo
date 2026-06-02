@@ -20,6 +20,31 @@ def effective_context_limit(task: TextGenerationTaskParams) -> int | None:
     return min(task.max_context_tokens, model_context_limit)
 
 
+def effective_max_output_tokens(
+    task: TextGenerationTaskParams,
+    prompt_tokens: int,
+) -> int:
+    if task.max_output_tokens is not None:
+        if task.max_output_tokens <= 0:
+            raise ValueError(
+                f"max_output_tokens must be greater than zero, got {task.max_output_tokens}"
+            )
+        return task.max_output_tokens
+
+    context_limit = effective_context_limit(task)
+    if context_limit is None:
+        return MAX_TOKENS
+
+    remaining_context = context_limit - prompt_tokens
+    if remaining_context <= 0:
+        raise ValueError(
+            "Prompt token count leaves no room for generation: "
+            f"prompt_tokens={prompt_tokens}, "
+            f"max_context_tokens={context_limit}"
+        )
+    return min(MAX_TOKENS, remaining_context)
+
+
 def validate_generation_context(
     task: TextGenerationTaskParams,
     prompt_tokens: int,
@@ -40,7 +65,7 @@ def validate_generation_context(
     if context_limit is None:
         return
 
-    max_output_tokens = task.max_output_tokens or MAX_TOKENS
+    max_output_tokens = effective_max_output_tokens(task, prompt_tokens)
     requested_tokens = prompt_tokens + max_output_tokens
     if requested_tokens > context_limit:
         raise ValueError(

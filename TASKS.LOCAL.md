@@ -147,6 +147,13 @@ Hoje o comportamento ruim observado e:
       `ModelCard.context_length`;
     - se a request nao trouxer limite, usa `ModelCard.context_length`;
     - limite de prompt usa `max_prompt_tokens` da request;
+    - quando a request nao traz `max_tokens`, o padrao de saida MLX caiu de
+      32168 para 1024 tokens;
+    - esse padrao tambem e limitado pelo contexto restante
+      (`context_length - prompt_tokens`), evitando reservar/usar KV cache como
+      se toda chamada pudesse gerar mais 32k tokens;
+    - se a request trouxer `max_tokens`, o valor explicito continua sendo
+      respeitado desde que caiba no contexto efetivo;
     - docs explicam que `context_length`, `n_ctx` e `max_model_len` vindos do
       provider sao respeitados por request;
     - `make_kv_cache` agora reduz `RotatingKVCache.max_size` para o limite

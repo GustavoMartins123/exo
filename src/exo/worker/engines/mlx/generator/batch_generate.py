@@ -32,9 +32,10 @@ from exo.worker.engines.mlx.cache import (
     encode_prompt,
     make_kv_cache,
 )
-from exo.worker.engines.mlx.constants import DEFAULT_TOP_LOGPROBS, MAX_TOKENS
+from exo.worker.engines.mlx.constants import DEFAULT_TOP_LOGPROBS
 from exo.worker.engines.mlx.context_limits import (
     effective_context_limit,
+    effective_max_output_tokens,
     validate_generation_context,
 )
 from exo.worker.engines.mlx.generator.generate import (
@@ -165,6 +166,7 @@ class ExoBatchGenerator:
             media_regions = vision.media_regions
         validate_generation_context(task_params, len(all_prompt_tokens))
         max_kv_size = effective_context_limit(task_params)
+        max_tokens = effective_max_output_tokens(task_params, len(all_prompt_tokens))
 
         is_bench = task_params.bench
 
@@ -352,8 +354,6 @@ class ExoBatchGenerator:
             # Only sample length eos tokens
             eos_ids = eos_ids_from_tokenizer(self.tokenizer)
             logits_processors = [ban_token_ids(eos_ids)] + logits_processors
-
-        max_tokens = task_params.max_output_tokens or MAX_TOKENS
 
         uids = self._mlx_gen.insert(
             prompts=[cast(list[int], last_tokens.tolist())],

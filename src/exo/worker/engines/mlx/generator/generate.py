@@ -53,10 +53,10 @@ from exo.worker.engines.mlx.constants import (
     DEFAULT_TOP_LOGPROBS,
     KV_BITS,
     KV_GROUP_SIZE,
-    MAX_TOKENS,
 )
 from exo.worker.engines.mlx.context_limits import (
     effective_context_limit,
+    effective_max_output_tokens,
     validate_generation_context,
 )
 from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
@@ -583,6 +583,7 @@ def mlx_generate(
     media_regions: list[MediaRegion] = vision.media_regions if vision else []
     validate_generation_context(task, len(all_prompt_tokens))
     max_kv_size = effective_context_limit(task)
+    max_tokens = effective_max_output_tokens(task, len(all_prompt_tokens))
 
     # Do not use the prefix cache if we are trying to do benchmarks.
     is_bench = task.bench
@@ -767,7 +768,6 @@ def mlx_generate(
     # stream_generate starts from the last token
     last_token = prompt_tokens[-2:]
 
-    max_tokens = task.max_output_tokens or MAX_TOKENS
     accumulated_text = ""
     generated_text_parts: list[str] = []
     generation_start_time = time.perf_counter()
