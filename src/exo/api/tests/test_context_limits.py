@@ -23,3 +23,18 @@ async def test_chat_completion_accepts_provider_context_length() -> None:
     assert params.max_output_tokens == 16
     assert params.max_context_tokens == 32768
     assert params.max_prompt_tokens == 32000
+
+
+@pytest.mark.anyio
+async def test_chat_completion_accepts_truncation_policy() -> None:
+    request = ChatCompletionRequest.model_validate(
+        {
+            "model": "mlx-community/Qwen3.6-27B-4bit",
+            "messages": [{"role": "user", "content": "hi"}],
+            "truncation": "error",
+        }
+    )
+
+    params = await chat_request_to_text_generation(request)
+
+    assert params.truncation == "error"

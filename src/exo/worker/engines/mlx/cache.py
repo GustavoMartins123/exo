@@ -514,6 +514,31 @@ def encode_prompt(tokenizer: TokenizerWrapper, prompt: str) -> mx.array:
     return mx.array(prompt_tokens)
 
 
+def truncate_prompt_tokens(
+    prompt_tokens: mx.array,
+    *,
+    max_prompt_tokens: int,
+    protected_prefix_tokens: int,
+) -> tuple[mx.array, int]:
+    original_length = len(prompt_tokens)
+    if max_prompt_tokens >= original_length:
+        return prompt_tokens, 0
+    if max_prompt_tokens <= 0:
+        raise ValueError(f"max_prompt_tokens must be positive, got {max_prompt_tokens}")
+
+    prefix_length = min(protected_prefix_tokens, max_prompt_tokens // 4)
+    suffix_length = max_prompt_tokens - prefix_length
+    if prefix_length <= 0:
+        truncated = prompt_tokens[-suffix_length:]
+    elif suffix_length <= 0:
+        truncated = prompt_tokens[:prefix_length]
+    else:
+        truncated = mx.concatenate(
+            [prompt_tokens[:prefix_length], prompt_tokens[-suffix_length:]]
+        )
+    return truncated, original_length - len(truncated)
+
+
 def _entry_length(
     c: KVCache
     | RotatingKVCache

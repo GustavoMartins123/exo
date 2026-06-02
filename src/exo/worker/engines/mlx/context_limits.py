@@ -24,16 +24,13 @@ def effective_max_output_tokens(
     task: TextGenerationTaskParams,
     prompt_tokens: int,
 ) -> int:
+    requested_max_output_tokens = max_output_tokens_from_request(task)
     if task.max_output_tokens is not None:
-        if task.max_output_tokens <= 0:
-            raise ValueError(
-                f"max_output_tokens must be greater than zero, got {task.max_output_tokens}"
-            )
-        return task.max_output_tokens
+        return requested_max_output_tokens
 
     context_limit = effective_context_limit(task)
     if context_limit is None:
-        return MAX_TOKENS
+        return requested_max_output_tokens
 
     remaining_context = context_limit - prompt_tokens
     if remaining_context <= 0:
@@ -42,7 +39,17 @@ def effective_max_output_tokens(
             f"prompt_tokens={prompt_tokens}, "
             f"max_context_tokens={context_limit}"
         )
-    return min(MAX_TOKENS, remaining_context)
+    return min(requested_max_output_tokens, remaining_context)
+
+
+def max_output_tokens_from_request(task: TextGenerationTaskParams) -> int:
+    if task.max_output_tokens is not None:
+        if task.max_output_tokens <= 0:
+            raise ValueError(
+                f"max_output_tokens must be greater than zero, got {task.max_output_tokens}"
+            )
+        return task.max_output_tokens
+    return MAX_TOKENS
 
 
 def validate_generation_context(

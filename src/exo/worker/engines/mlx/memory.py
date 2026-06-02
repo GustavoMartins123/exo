@@ -307,6 +307,7 @@ def fit_mlx_context_budget_to_memory(
     prompt_tokens: int,
     max_output_tokens: int,
     max_context_tokens: int | None,
+    allow_prompt_truncation: bool = False,
 ) -> MlxContextBudgetFit:
     if os.environ.get("EXO_MLX_DISABLE_MEMORY_PREFLIGHT") == "1":
         return MlxContextBudgetFit(
@@ -355,6 +356,24 @@ def fit_mlx_context_budget_to_memory(
 
     fitted_context = min(requested_context, max_total_tokens_that_fit)
     if fitted_context < prompt_tokens:
+        if allow_prompt_truncation and fitted_context >= 2:
+            logger.warning(
+                "generation_memory_budget_clamped "
+                f"model={task.model} prompt_tokens={prompt_tokens} "
+                f"requested_context={requested_context} "
+                f"fitted_context={fitted_context} "
+                f"requested_max_output_tokens={max_output_tokens} "
+                "fitted_max_output_tokens=1 "
+                f"kv_budget_tokens={max_total_tokens_that_fit} "
+                f"cuda_free={_format_bytes(budget.cuda_free_bytes)} "
+                f"reserve={_format_bytes(budget.reserve_bytes)} "
+                "prompt_truncation=drop_oldest"
+            )
+            return MlxContextBudgetFit(
+                max_context_tokens=int(fitted_context),
+                max_output_tokens=1,
+                budget=budget,
+            )
         raise ValueError(
             "Request rejected before MLX prefill because estimated KV cache "
             "for the prompt does not fit in available GPU memory: "
@@ -403,6 +422,7 @@ def enforce_mlx_memory_budget(
         prompt_tokens=prompt_tokens,
         max_output_tokens=max_output_tokens,
         max_context_tokens=None,
+        allow_prompt_truncation=False,
     )
 
 

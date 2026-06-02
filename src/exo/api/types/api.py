@@ -234,6 +234,7 @@ class ChatCompletionRequest(BaseModel):
         ),
     )
     max_prompt_tokens: int | None = None
+    truncation: Literal["error", "drop_oldest"] = "drop_oldest"
     tools: list[dict[str, Any]] | None = None
     reasoning_effort: ReasoningEffort | None = None
     enable_thinking: bool | None = None

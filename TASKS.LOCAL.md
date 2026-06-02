@@ -202,13 +202,22 @@ Hoje o comportamento ruim observado e:
     - logs incluem `requested_context`, `fitted_context` e
       `kv_budget_tokens`.
 
-- [ ] Degradar contexto antes de falhar.
+- [x] Degradar contexto antes de falhar.
   - Se `prompt + max_tokens` nao couber:
     - reduzir `max_tokens`;
     - se ainda nao couber, reduzir contexto efetivo;
     - se prompt exceder contexto efetivo, aplicar truncamento controlado quando
       permitido.
   - Erro so deve acontecer quando nao ha politica segura para truncar o prompt.
+  - Feito:
+    - `ChatCompletionRequest` aceita `truncation`;
+    - politica padrao OpenAI-compatible: `drop_oldest`;
+    - politica estrita disponivel: `error`;
+    - quando `drop_oldest` esta ativa, prompt tokenizado e cortado antes do
+      prefill preservando prefixo inicial protegido e final recente;
+    - truncamento e bloqueado para vision quando nao ha forma segura de
+      preservar regioes de midia;
+    - logs usam `generation_prompt_truncated`.
 
 - [ ] Implementar slots/conversas para KV prefix cache.
   - Similar ao conceito de slot do `llama.cpp/server`.

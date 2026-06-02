@@ -13,6 +13,7 @@ from exo.shared.types.common import ModelId, TruncatingString
 
 MessageRole = Literal["user", "assistant", "system", "developer", "tool"]
 ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
+TruncationPolicy = Literal["error", "drop_oldest"]
 # How a model wants prior-turn reasoning content handled. Drives both the
 # server-side encoder (drop vs keep) and the integration configs we emit
 # (e.g. opencode's per-model `interleaved` flag).
@@ -112,6 +113,7 @@ class TextGenerationTaskParams(BaseModel, frozen=True):
     max_output_tokens: int | None = None
     max_context_tokens: int | None = None
     max_prompt_tokens: int | None = None
+    truncation: TruncationPolicy = "drop_oldest"
     temperature: float | None = None
     top_p: float | None = None
     stream: bool = False

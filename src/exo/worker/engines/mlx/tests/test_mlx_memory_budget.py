@@ -4,12 +4,15 @@ import pytest
 
 pytest.importorskip("mlx.core", exc_type=ImportError)
 
+import mlx.core as mx
+
 from exo.shared.models.model_cards import ModelId
 from exo.shared.types.text_generation import (
     InputMessage,
     InputMessageContent,
     TextGenerationTaskParams,
 )
+from exo.worker.engines.mlx.cache import truncate_prompt_tokens
 from exo.worker.engines.mlx.memory import (
     MemorySnapshot,
     enforce_mlx_memory_budget,
@@ -65,6 +68,19 @@ def test_estimates_kv_budget_from_local_layers_and_attention_shape() -> None:
     assert budget.local_layers == 2
     assert budget.kv_width == 1024
     assert budget.estimated_kv_bytes == 128 * 2 * 2 * 1024 * 2
+
+
+def test_truncates_prompt_tokens_preserving_prefix_and_suffix() -> None:
+    tokens = mx.array(list(range(20)))
+
+    truncated, removed = truncate_prompt_tokens(
+        tokens,
+        max_prompt_tokens=10,
+        protected_prefix_tokens=4,
+    )
+
+    assert removed == 10
+    assert truncated.tolist() == [0, 1, 12, 13, 14, 15, 16, 17, 18, 19]
 
 
 def test_rejects_request_when_estimated_kv_exceeds_available_memory(

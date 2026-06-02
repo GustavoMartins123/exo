@@ -48,6 +48,7 @@ from exo.worker.engines.mlx.cache import (
     is_non_trimmable_cache_entry,
     make_kv_cache,
     snapshot_ssm_states,
+    truncate_prompt_tokens,
 )
 from exo.worker.engines.mlx.constants import (
     DEFAULT_TOP_LOGPROBS,
@@ -56,7 +57,7 @@ from exo.worker.engines.mlx.constants import (
 )
 from exo.worker.engines.mlx.context_limits import (
     effective_context_limit,
-    effective_max_output_tokens,
+    max_output_tokens_from_request,
     validate_generation_context,
 )
 from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
@@ -584,18 +585,43 @@ def mlx_generate(
     if vision is not None:
         all_prompt_tokens = vision.prompt_tokens
     media_regions: list[MediaRegion] = vision.media_regions if vision else []
-    validate_generation_context(task, len(all_prompt_tokens))
     max_kv_size = effective_context_limit(task)
-    max_tokens = effective_max_output_tokens(task, len(all_prompt_tokens))
+    max_tokens = max_output_tokens_from_request(task)
     context_budget_fit = fit_mlx_context_budget_to_memory(
         task,
         model,
         prompt_tokens=len(all_prompt_tokens),
         max_output_tokens=max_tokens,
         max_context_tokens=max_kv_size,
+        allow_prompt_truncation=task.truncation == "drop_oldest",
     )
     max_kv_size = context_budget_fit.max_context_tokens
     max_tokens = context_budget_fit.max_output_tokens
+    if max_kv_size is not None:
+        max_prompt_tokens = max_kv_size - max_tokens
+        if len(all_prompt_tokens) > max_prompt_tokens:
+            if task.truncation != "drop_oldest":
+                validate_generation_context(task, len(all_prompt_tokens))
+            if media_regions:
+                raise ValueError(
+                    "Prompt exceeds memory-fitted context and cannot be token-truncated "
+                    "safely for vision requests"
+                )
+            all_prompt_tokens, truncated_tokens = truncate_prompt_tokens(
+                all_prompt_tokens,
+                max_prompt_tokens=max_prompt_tokens,
+                protected_prefix_tokens=1024,
+            )
+            logger.warning(
+                "generation_prompt_truncated "
+                f"model={task.model} truncated_tokens={truncated_tokens} "
+                f"prompt_tokens={len(all_prompt_tokens)} "
+                f"max_context_tokens={max_kv_size} max_output_tokens={max_tokens}"
+            )
+    validation_task = task.model_copy(
+        update={"max_context_tokens": max_kv_size, "max_output_tokens": max_tokens}
+    )
+    validate_generation_context(validation_task, len(all_prompt_tokens))
 
     # Do not use the prefix cache if we are trying to do benchmarks.
     is_bench = task.bench
