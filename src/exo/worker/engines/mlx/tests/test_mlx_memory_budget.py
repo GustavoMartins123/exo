@@ -14,6 +14,7 @@ from exo.worker.engines.mlx.memory import (
     MemorySnapshot,
     enforce_mlx_memory_budget,
     estimate_mlx_kv_memory_budget,
+    fit_mlx_max_output_tokens_to_memory,
 )
 from exo.worker.engines.mlx.types import Model
 
@@ -82,6 +83,27 @@ def test_rejects_request_when_estimated_kv_exceeds_available_memory(
         )
 
 
+def test_clamps_output_tokens_when_prompt_fits_but_request_is_too_large(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "exo.worker.engines.mlx.memory.read_memory_snapshot",
+        lambda: _snapshot(
+            used=int(10.8 * 1024**3),
+            total=12 * 1024**3,
+        ),
+    )
+
+    fitted = fit_mlx_max_output_tokens_to_memory(
+        _task(),
+        cast(Model, _FakeModel()),
+        prompt_tokens=8192,
+        max_output_tokens=50000,
+    )
+
+    assert 1 <= fitted < 50000
+
+
 def test_skips_rejection_when_cuda_memory_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -97,9 +119,10 @@ def test_skips_rejection_when_cuda_memory_is_unavailable(
         ),
     )
 
-    enforce_mlx_memory_budget(
+    fitted = fit_mlx_max_output_tokens_to_memory(
         _task(),
         cast(Model, _FakeModel()),
         prompt_tokens=8192,
         max_output_tokens=1024,
     )
+    assert fitted == 1024

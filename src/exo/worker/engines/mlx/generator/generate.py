@@ -61,7 +61,7 @@ from exo.worker.engines.mlx.context_limits import (
 )
 from exo.worker.engines.mlx.generator.remote_prefill import remote_prefill
 from exo.worker.engines.mlx.memory import (
-    enforce_mlx_memory_budget,
+    fit_mlx_max_output_tokens_to_memory,
     log_generation_memory,
 )
 from exo.worker.engines.mlx.types import KVCacheType, Model
@@ -587,7 +587,7 @@ def mlx_generate(
     validate_generation_context(task, len(all_prompt_tokens))
     max_kv_size = effective_context_limit(task)
     max_tokens = effective_max_output_tokens(task, len(all_prompt_tokens))
-    enforce_mlx_memory_budget(
+    max_tokens = fit_mlx_max_output_tokens_to_memory(
         task,
         model,
         prompt_tokens=len(all_prompt_tokens),

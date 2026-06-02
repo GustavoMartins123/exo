@@ -174,9 +174,11 @@ Hoje o comportamento ruim observado e:
       - usa numero de camadas locais do shard carregado;
       - estima largura de KV por `n_kv_heads * head_dim` quando disponivel;
       - compara com VRAM livre da GPU visivel via NVML;
-      - rejeita a request com erro claro antes de deixar CUDA/MLX morrer por
-        OOM;
+      - reduz `max_tokens` automaticamente quando o prompt cabe mas a saida
+        solicitada nao cabe;
+      - so rejeita a request quando nem o prompt cabe na VRAM disponivel;
       - loga `generation_memory_budget` com estimativa, VRAM livre e reserva.
+      - loga `generation_memory_budget_clamped` quando aplica degradacao.
   - Observacao:
     - isso limita o contexto dinamico por request; redistribuicao proporcional
       de KV/cache entre GPUs continua na prioridade 5.

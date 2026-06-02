@@ -47,6 +47,10 @@ class MlxMemoryBudget:
             return None
         return max(0, self.cuda_free_bytes - self.reserve_bytes)
 
+    @property
+    def bytes_per_token(self) -> int:
+        return self.local_layers * 2 * self.kv_width * self.bytes_per_element
+
 
 def _call_mx_memory_function(name: str) -> int | None:
     function = getattr(mx, name, None)
@@ -202,15 +206,15 @@ def estimate_mlx_kv_memory_budget(
     )
 
 
-def enforce_mlx_memory_budget(
+def fit_mlx_max_output_tokens_to_memory(
     task: TextGenerationTaskParams,
     model: "Model",
     *,
     prompt_tokens: int,
     max_output_tokens: int,
-) -> None:
+) -> int:
     if os.environ.get("EXO_MLX_DISABLE_MEMORY_PREFLIGHT") == "1":
-        return
+        return max_output_tokens
 
     budget = estimate_mlx_kv_memory_budget(
         task,
@@ -224,7 +228,7 @@ def enforce_mlx_memory_budget(
             f"model={task.model} prompt_tokens={prompt_tokens} "
             f"max_output_tokens={max_output_tokens}"
         )
-        return
+        return max_output_tokens
 
     available_after_reserve = budget.available_after_reserve_bytes
     logger.info(
@@ -237,21 +241,64 @@ def enforce_mlx_memory_budget(
         f"available_after_reserve={_format_bytes(available_after_reserve)}"
     )
     if available_after_reserve is None:
-        return
+        return max_output_tokens
 
-    if budget.estimated_kv_bytes > available_after_reserve:
+    if budget.estimated_kv_bytes <= available_after_reserve:
+        return max_output_tokens
+
+    max_total_tokens = available_after_reserve // budget.bytes_per_token
+    fitted_max_output_tokens = max_total_tokens - prompt_tokens
+    if fitted_max_output_tokens >= 1:
+        logger.warning(
+            "generation_memory_budget_clamped "
+            f"model={task.model} prompt_tokens={prompt_tokens} "
+            f"requested_max_output_tokens={max_output_tokens} "
+            f"fitted_max_output_tokens={fitted_max_output_tokens} "
+            f"estimated_kv={_format_bytes(budget.estimated_kv_bytes)} "
+            f"cuda_free={_format_bytes(budget.cuda_free_bytes)} "
+            f"reserve={_format_bytes(budget.reserve_bytes)}"
+        )
+        return int(fitted_max_output_tokens)
+
+    prompt_only_kv_bytes = prompt_tokens * budget.bytes_per_token
+    if prompt_only_kv_bytes > available_after_reserve:
         raise ValueError(
             "Request rejected before MLX prefill because estimated KV cache "
-            "does not fit in available GPU memory: "
+            "for the prompt does not fit in available GPU memory: "
             f"model={task.model}, "
             f"prompt_tokens={prompt_tokens}, "
             f"max_output_tokens={max_output_tokens}, "
             f"total_tokens={budget.total_tokens}, "
             f"local_layers={budget.local_layers}, "
-            f"estimated_kv={_format_bytes(budget.estimated_kv_bytes)}, "
+            f"estimated_prompt_kv={_format_bytes(prompt_only_kv_bytes)}, "
             f"cuda_free={_format_bytes(budget.cuda_free_bytes)}, "
             f"reserve={_format_bytes(budget.reserve_bytes)}"
         )
+
+    logger.warning(
+        "generation_memory_budget_clamped "
+        f"model={task.model} prompt_tokens={prompt_tokens} "
+        f"requested_max_output_tokens={max_output_tokens} fitted_max_output_tokens=1 "
+        f"estimated_kv={_format_bytes(budget.estimated_kv_bytes)} "
+        f"cuda_free={_format_bytes(budget.cuda_free_bytes)} "
+        f"reserve={_format_bytes(budget.reserve_bytes)}"
+    )
+    return 1
+
+
+def enforce_mlx_memory_budget(
+    task: TextGenerationTaskParams,
+    model: "Model",
+    *,
+    prompt_tokens: int,
+    max_output_tokens: int,
+) -> None:
+    _ = fit_mlx_max_output_tokens_to_memory(
+        task,
+        model,
+        prompt_tokens=prompt_tokens,
+        max_output_tokens=max_output_tokens,
+    )
 
 
 def format_memory_snapshot(snapshot: MemorySnapshot) -> str:
