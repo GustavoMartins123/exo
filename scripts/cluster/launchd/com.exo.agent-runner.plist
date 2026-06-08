@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.exo.agent-runner</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/exo-agent-runner.sh</string>
+    <string>drain</string>
+  </array>
+
+  <key>StartInterval</key>
+  <integer>2</integer>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>EXO_AGENT_SHARED_DIR</key>
+    <string>/var/lib/exo-agent</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/exo-agent-runner.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/exo-agent-runner.err.log</string>
+</dict>
+</plist>

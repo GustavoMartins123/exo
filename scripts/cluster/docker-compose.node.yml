@@ -14,5 +14,5 @@ services:
       EXO_AGENT_ADVERTISE_HOST: ${EXO_AGENT_ADVERTISE_HOST:-}
       EXO_AGENT_SHARED_DIR: /var/lib/exo-agent
     volumes:
-      - /var/lib/exo-agent:/var/lib/exo-agent
+      - ${EXO_AGENT_SHARED_DIR:-/var/lib/exo-agent}:/var/lib/exo-agent
     command: ["python", "/app/node_agent.py"]

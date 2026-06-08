@@ -37,6 +37,21 @@ Hoje o comportamento ruim observado e:
     - README com bootstrap, comandos `start/stop/restart/pull/status` e nota de
       rede dedicada.
 
+- [x] Adicionar suporte basico ao Mac Studio nos scripts locais.
+  - Feito:
+    - `scripts/start_exo_detached.sh` detecta o diretorio do repo a partir do
+      proprio script em vez de assumir `$HOME/exo`;
+    - no macOS usa `uv run --extra mlx` por padrao;
+    - no Linux continua usando `mlx-cuda13`;
+    - default removeu `--no-batch`, preservando concorrencia via
+      `BatchGenerator`;
+    - `scripts/cluster/install_host_runner_macos.sh` instala runner via
+      `launchd`;
+    - `docker-compose.node.yml` permite configurar o volume compartilhado do
+      agente por `EXO_AGENT_SHARED_DIR`;
+    - runner reporta memoria unificada Apple Silicon no status quando nao ha
+      `nvidia-smi`.
+
 ## Prioridade 0 - Reproduzir e medir antes de alterar
 
 - [ ] Criar um teste manual fixo com o payload pequeno do front.

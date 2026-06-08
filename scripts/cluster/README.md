@@ -40,6 +40,8 @@ all child nodes. No manual `curl` is needed.
 
 ## Install on each GPU host
 
+### Linux host runner
+
 From the Exo repo:
 
 ```bash
@@ -53,10 +55,39 @@ export EXO_AGENT_SHARED_DIR=/var/lib/exo-agent
 export EXO_DIR=/home/iapar/exo
 ```
 
+### macOS / Mac Studio host runner
+
+On macOS, install the launchd runner from the Exo repo:
+
+```bash
+scripts/cluster/install_host_runner_macos.sh
+```
+
+Optional host settings before installing:
+
+```bash
+export EXO_AGENT_SHARED_DIR="$HOME/.local/share/exo-agent"
+export EXO_DIR="$PWD"
+```
+
+The detached starter auto-detects the repo directory when launched from
+`scripts/start_exo_detached.sh`, uses `--extra mlx` on macOS, and does not pass
+`--no-batch` by default.
+
 Start the node agent container:
 
 ```bash
 cd scripts/cluster
+export EXO_AGENT_SHARED_DIR="${EXO_AGENT_SHARED_DIR:-/var/lib/exo-agent}"
+EXO_NODE_NAME="$(hostname)" \
+docker compose -f docker-compose.node.yml up -d --build
+```
+
+On Mac Studio, use the same shared dir as the launchd runner:
+
+```bash
+cd scripts/cluster
+export EXO_AGENT_SHARED_DIR="$HOME/.local/share/exo-agent"
 EXO_NODE_NAME="$(hostname)" \
 docker compose -f docker-compose.node.yml up -d --build
 ```

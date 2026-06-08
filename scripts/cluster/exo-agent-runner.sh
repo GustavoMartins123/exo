@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SHARED_DIR="${EXO_AGENT_SHARED_DIR:-/var/lib/exo-agent}"
+DEFAULT_SHARED_DIR="/var/lib/exo-agent"
+if [ "$(uname -s)" = "Darwin" ]; then
+  DEFAULT_SHARED_DIR="$HOME/.local/share/exo-agent"
+fi
+SHARED_DIR="${EXO_AGENT_SHARED_DIR:-$DEFAULT_SHARED_DIR}"
 COMMAND_DIR="$SHARED_DIR/commands"
 STATUS_FILE="$SHARED_DIR/status.json"
-EXO_DIR="${EXO_DIR:-$HOME/exo}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+DEFAULT_EXO_DIR="$HOME/exo"
+if [ -d "$SCRIPT_DIR/../.." ] && [ -f "$SCRIPT_DIR/../../pyproject.toml" ]; then
+  DEFAULT_EXO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
+fi
+EXO_DIR="${EXO_DIR:-$DEFAULT_EXO_DIR}"
 SESSION_NAME="${EXO_SESSION_NAME:-exo}"
 START_SCRIPT="${EXO_START_SCRIPT:-$EXO_DIR/scripts/start_exo_detached.sh}"
 LOG_FILE="${EXO_LOG_CAPTURE_DIR:-$HOME/.cache/exo}/exo.detached.log"
@@ -59,11 +68,29 @@ write_status() {
   if [ -d "$EXO_DIR/.git" ]; then
     git_commit="$(git -C "$EXO_DIR" rev-parse --short HEAD 2>/dev/null || true)"
   fi
-  ip_addresses="$(hostname -I 2>/dev/null | xargs || true)"
+  if ip_addresses="$(hostname -I 2>/dev/null | xargs)"; then
+    :
+  elif command -v ipconfig >/dev/null 2>&1; then
+    ip_addresses="$(ipconfig getifaddr en0 2>/dev/null || true)"
+    local en1_ip
+    en1_ip="$(ipconfig getifaddr en1 2>/dev/null || true)"
+    if [ -n "$en1_ip" ]; then
+      ip_addresses="$ip_addresses $en1_ip"
+    fi
+    ip_addresses="$(printf '%s' "$ip_addresses" | xargs || true)"
+  else
+    ip_addresses="$(ifconfig 2>/dev/null | awk '/inet / && $2 != "127.0.0.1" {print $2}' | xargs || true)"
+  fi
   if command -v nvidia-smi >/dev/null 2>&1; then
     local gpu_output
     if gpu_output="$(nvidia-smi --query-gpu=name,memory.total,memory.used --format=csv,noheader,nounits 2>/dev/null)"; then
       gpu_summary="$(printf '%s\n' "$gpu_output" | paste -sd ';' -)"
+    fi
+  elif [ "$(uname -s)" = "Darwin" ]; then
+    local mem_gb
+    mem_gb="$(sysctl -n hw.memsize 2>/dev/null | awk '{printf "%.0fGB unified memory", $1/1024/1024/1024}' || true)"
+    if [ -n "$mem_gb" ]; then
+      gpu_summary="Apple Silicon, $mem_gb"
     fi
   fi
   if [ -f "$LOG_FILE" ]; then

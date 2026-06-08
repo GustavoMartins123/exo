@@ -3,9 +3,17 @@ set -euo pipefail
 
 SESSION_NAME="${EXO_SESSION_NAME:-exo}"
 CLUSTER_NAMESPACE="${EXO_LIBP2P_NAMESPACE:-my-cluster}"
-EXO_DIR="${EXO_DIR:-$HOME/exo}"
-EXO_EXTRA="${EXO_EXTRA:-mlx-cuda13}"
-EXO_ARGS="${EXO_ARGS:--v --no-batch}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+DEFAULT_EXO_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
+EXO_DIR="${EXO_DIR:-$DEFAULT_EXO_DIR}"
+if [ -z "${EXO_EXTRA:-}" ]; then
+  if [ "$(uname -s)" = "Darwin" ]; then
+    EXO_EXTRA="mlx"
+  else
+    EXO_EXTRA="mlx-cuda13"
+  fi
+fi
+EXO_ARGS="${EXO_ARGS:--v}"
 LOG_DIR="${EXO_LOG_CAPTURE_DIR:-$HOME/.cache/exo}"
 LOG_FILE="$LOG_DIR/exo.detached.log"
 
@@ -16,8 +24,13 @@ if [ ! -d "$EXO_DIR" ]; then
   exit 1
 fi
 
+SHELL_INIT="source '$HOME/.bashrc' >/dev/null 2>&1 || true"
+if [ "$(uname -s)" = "Darwin" ]; then
+  SHELL_INIT="source '$HOME/.zprofile' >/dev/null 2>&1 || true; source '$HOME/.zshrc' >/dev/null 2>&1 || true; source '$HOME/.bash_profile' >/dev/null 2>&1 || true; source '$HOME/.bashrc' >/dev/null 2>&1 || true"
+fi
+
 COMMAND="cd '$EXO_DIR' && \
-source '$HOME/.bashrc' >/dev/null 2>&1 || true && \
+$SHELL_INIT && \
 PY_NVIDIA_LIBS=\$(find '$EXO_DIR/.venv/lib' -path '*/site-packages/nvidia/*/lib' -type d 2>/dev/null | paste -sd: -) && \
 if [ -n \"\$PY_NVIDIA_LIBS\" ]; then export LD_LIBRARY_PATH=\"\$PY_NVIDIA_LIBS:\${LD_LIBRARY_PATH:-}\"; fi && \
 export EXO_LIBP2P_NAMESPACE='$CLUSTER_NAMESPACE' && \
