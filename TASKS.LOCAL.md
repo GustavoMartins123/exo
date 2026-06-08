@@ -308,6 +308,101 @@ Hoje o comportamento ruim observado e:
     - evitar 64k/262k nesse backend;
     - `max_tokens` baixo por padrao quando VRAM livre estiver baixa.
 
+## Prioridade 2.6 - CPU/RAM como tier de memoria no MLX
+
+- [ ] Implementar suporte proprio de CPU/RAM offload no backend MLX, sem
+  `llama.cpp`.
+  - Pesquisa registrada em `docs/research/mlx-cpu-ram-offload.md`.
+  - Objetivo:
+    - Mac Studio 96 GB como node de memoria unificada/contexto longo;
+    - A5000 host com 64 GB RAM como node forte para shard/cache;
+    - RTX 3060 hosts com 16 GB RAM como compute limitado, evitando spill
+      agressivo.
+  - Ordem recomendada:
+    - telemetry VRAM/RAM/unified memory;
+    - KV cache paginado por slot;
+    - KV frio quantizado e movido para RAM;
+    - scheduler heterogeneo por VRAM/RAM/rede;
+    - offload de pesos por camada apenas depois de medir custo real.
+
+## Prioridade 2.7 - Scheduler e balanceamento no nivel vLLM
+
+- [x] Pesquisar arquitetura do vLLM local em `../vllm` e docs oficiais.
+  - Dump registrado em `docs/research/vllm-architecture-dump-for-exo.md`.
+  - Pontos aproveitaveis:
+    - separar API/ingress de engine scheduler;
+    - filas `waiting`/`running` por modelo;
+    - budget de tokens por passo;
+    - admissao antes do runner usando KV/memoria;
+    - KV cache em blocos com ref count, hash e free queue;
+    - balanceamento por queue depth, KV affinity, VRAM/RAM, RTT e erros;
+    - leases/heartbeats para KV remoto antes de disaggregated prefill/decode.
+
+- [ ] Implementar `ClusterRequestRouter`.
+  - Deve escolher instancia/modelo usando:
+    - modelo carregado/downloaded;
+    - fila/running por node;
+    - VRAM/RAM livre;
+    - pressao de KV cache;
+    - afinidade por `cache_slot`/conversa;
+    - RTT/rede;
+    - erros recentes do runner.
+
+- [ ] Implementar `ExoScheduler` antes de enviar task ao runner.
+  - Deve manter filas `waiting`/`running` por modelo.
+  - Deve admitir requests somente quando token budget e KV budget couberem.
+  - Deve deixar request esperando/degradar antes de disparar OOM no runner.
+  - Feito parcialmente:
+    - caminho texto comum do `ExoBatchGenerator` passou a usar o prefill
+      continuo do `mlx_lm.BatchGenerator`;
+    - antes o Exo fazia prefill sincrono antes de inserir no batch, o que
+      reduzia a concorrencia real;
+    - `EXO_PREFILL_STEP_SIZE` agora controla o tamanho do chunk de prefill no
+      batch continuo;
+    - default do batch continuo caiu para 1024 tokens para reduzir starvation
+      de request curta atras de prompt grande;
+    - `prefill_batch_size` e `completion_batch_size` agora respeitam
+      `EXO_MAX_CONCURRENT_REQUESTS`;
+    - vision, remote prefill e caches SSM/nao triviais continuam no caminho
+      legado para preservar snapshots/patches especificos.
+  - Primeiro marco pratico:
+    - aceitar 2 requests de usuarios diferentes no mesmo modelo carregado;
+    - a segunda request deve iniciar antes da primeira terminar;
+    - streams dos dois usuarios devem receber chunks intercalados;
+    - `EXO_MAX_CONCURRENT_REQUESTS=2` deve ser suficiente para esse teste;
+    - se nao houver memoria para as duas, falhar/degradar por admissao
+      controlada, nao por OOM.
+  - Ponto de atencao:
+    - `BatchGenerator` e `ExoBatchGenerator` ja existem;
+    - garantir que chat/completions use esse caminho por padrao;
+    - garantir que prefill grande seja chunkado/orcado para nao travar a
+      entrada de request curta.
+
+- [x] Criar teste/manual script de concorrencia 2 usuarios.
+  - Feito:
+    - `scripts/test_two_user_concurrency.py`;
+    - envia request A longa e request B curta para `/v1/chat/completions`;
+    - passa quando B recebe primeiro chunk antes de A finalizar.
+  - Subir uma request longa do usuario A.
+  - Enquanto A ainda gera, enviar request curta do usuario B.
+  - Validar nos logs:
+    - duas tasks ativas no batch;
+    - chunks emitidos para A e B;
+    - B nao espera A finalizar;
+    - memoria nao passa do budget.
+
+- [ ] Evoluir `KVPrefixCache` para `KVBlockPool`.
+  - Blocos com `block_id`, `block_hash`, `ref_count` e free queue.
+  - Mapeamentos:
+    - `request_id -> block_ids`;
+    - `cache_slot -> block_ids`;
+    - `cache_hash -> block_ids`.
+  - Eviction deve ser por VRAM/blocos livres, nao por RAM generica.
+
+- [ ] Adicionar leases/heartbeats para KV remoto.
+  - Necessario antes de prefill/decode remoto serio.
+  - Se consumidor morrer ou ficar sem heartbeat, produtor libera KV preso.
+
 ## Prioridade 3 - Corrigir eviction do KV prefix cache
 
 - [ ] Trocar a metrica de eviction de RAM para VRAM.

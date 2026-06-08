@@ -1,4 +1,5 @@
 import contextlib
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -23,6 +24,7 @@ from exo.api.types import (
     TopLogprobItem,
     Usage,
 )
+from exo.shared.constants import EXO_MAX_CONCURRENT_REQUESTS
 from exo.shared.types.memory import Memory
 from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.shared.types.worker.runner_response import GenerationResponse
@@ -30,6 +32,7 @@ from exo.worker.engines.mlx.cache import (
     CacheSnapshot,
     KVPrefixCache,
     encode_prompt,
+    has_non_kv_caches,
     make_kv_cache,
     truncate_prompt_tokens,
 )
@@ -70,6 +73,21 @@ from exo.worker.runner.bootstrap import logger
 
 _MIN_PREFIX_HIT_RATIO_TO_UPDATE = 0.5
 REMOTE_PREFILL_MIN_TOKENS = 1000
+DEFAULT_BATCH_PREFILL_STEP_SIZE = 1024
+
+
+def _batch_prefill_step_size() -> int:
+    raw_value = os.getenv("EXO_PREFILL_STEP_SIZE")
+    if raw_value is None:
+        return DEFAULT_BATCH_PREFILL_STEP_SIZE
+    try:
+        return max(1, int(raw_value))
+    except ValueError:
+        logger.warning(
+            f"Invalid EXO_PREFILL_STEP_SIZE={raw_value!r}; "
+            f"using {DEFAULT_BATCH_PREFILL_STEP_SIZE}"
+        )
+        return DEFAULT_BATCH_PREFILL_STEP_SIZE
 
 
 def _stop_sequences(task_params: TextGenerationTaskParams) -> list[str]:
@@ -98,6 +116,11 @@ class _EngineTask:
     media_regions: list[MediaRegion] = field(default_factory=list)
     first_gen_token_time: float | None = None
     last_gen_token_time: float | None = None
+    on_prefill_progress: Callable[[int, int], None] | None = None
+    prompt_start_time: float = 0.0
+    uncached_prompt_tokens: int = 0
+    cache_snapshots: list[CacheSnapshot] = field(default_factory=list)
+    prefix_cache_saved: bool = False
 
 
 @dataclass(eq=False)
@@ -112,10 +135,21 @@ class ExoBatchGenerator:
     _active_tasks: dict[int, _EngineTask] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
+        prefill_step_size = _batch_prefill_step_size()
+        completion_batch_size = max(1, EXO_MAX_CONCURRENT_REQUESTS)
+        prefill_batch_size = max(1, min(completion_batch_size, 8))
         self._mlx_gen = MlxBatchGenerator(
             model=self.model,
             stop_tokens=[[t] for t in eos_ids_from_tokenizer(self.tokenizer)],
-            prefill_step_size=4096,
+            prefill_step_size=prefill_step_size,
+            prefill_batch_size=prefill_batch_size,
+            completion_batch_size=completion_batch_size,
+        )
+        logger.info(
+            "using continuous batch settings "
+            f"prefill_step_size={prefill_step_size} "
+            f"prefill_batch_size={prefill_batch_size} "
+            f"completion_batch_size={completion_batch_size}"
         )
         self._step_count = 0
 
@@ -274,64 +308,79 @@ class ExoBatchGenerator:
             uncached_count > REMOTE_PREFILL_MIN_TOKENS
             and task_params.prefill_endpoint is not None
         )
+        use_legacy_prefill = (
+            use_remote or vision is not None or has_non_kv_caches(cache)
+        )
 
         _prefill_tps: float = 0.0
         _prefill_tokens: int = 0
         cache_snapshots: list[CacheSnapshot] = []
-        remote_prefilled = False
-        with vision_ctx:
-            if use_remote and task_params.prefill_endpoint is not None:
-                try:
+        if use_legacy_prefill:
+            remote_prefilled = False
+            with vision_ctx:
+                if use_remote and task_params.prefill_endpoint is not None:
+                    try:
+                        log_generation_memory(
+                            "batch_remote_prefill_start",
+                            task_params,
+                            prompt_tokens=len(all_prompt_tokens),
+                            uncached_prompt_tokens=len(prompt_tokens),
+                            prefix_hit_length=prefix_hit_length,
+                            prefix_cache_hit=prefix_cache_hit,
+                        )
+                        _prefill_tps, _prefill_tokens, cache_snapshots = remote_prefill(
+                            prompt_tokens[:-1],
+                            cache,
+                            on_prefill_progress,
+                            endpoint=task_params.prefill_endpoint,
+                            request_id=str(uuid.uuid4()),
+                            model_id=str(task_params.model),
+                            start_pos=prefix_hit_length,
+                        )
+                        remote_prefilled = True
+                    except Exception:
+                        logger.opt(exception=True).warning(
+                            "Remote prefill failed, falling back to local prefill"
+                        )
+
+                if not remote_prefilled:
                     log_generation_memory(
-                        "batch_remote_prefill_start",
+                        "batch_prefill_start",
                         task_params,
                         prompt_tokens=len(all_prompt_tokens),
                         uncached_prompt_tokens=len(prompt_tokens),
                         prefix_hit_length=prefix_hit_length,
                         prefix_cache_hit=prefix_cache_hit,
                     )
-                    _prefill_tps, _prefill_tokens, cache_snapshots = remote_prefill(
+                    _prefill_tps, _prefill_tokens, cache_snapshots = prefill(
+                        self.model,
+                        self.tokenizer,
+                        sampler,
                         prompt_tokens[:-1],
                         cache,
+                        self.group,
                         on_prefill_progress,
-                        endpoint=task_params.prefill_endpoint,
-                        request_id=str(uuid.uuid4()),
-                        model_id=str(task_params.model),
-                        start_pos=prefix_hit_length,
+                        distributed_prompt_progress_callback,
                     )
-                    remote_prefilled = True
-                except Exception:
-                    logger.opt(exception=True).warning(
-                        "Remote prefill failed, falling back to local prefill"
-                    )
-
-            if not remote_prefilled:
-                log_generation_memory(
-                    "batch_prefill_start",
-                    task_params,
-                    prompt_tokens=len(all_prompt_tokens),
-                    uncached_prompt_tokens=len(prompt_tokens),
-                    prefix_hit_length=prefix_hit_length,
-                    prefix_cache_hit=prefix_cache_hit,
-                )
-                _prefill_tps, _prefill_tokens, cache_snapshots = prefill(
-                    self.model,
-                    self.tokenizer,
-                    sampler,
-                    prompt_tokens[:-1],
-                    cache,
-                    self.group,
-                    on_prefill_progress,
-                    distributed_prompt_progress_callback,
-                )
-        log_generation_memory(
-            "batch_prefill_done",
-            task_params,
-            prompt_tokens=len(all_prompt_tokens),
-            uncached_prompt_tokens=len(prompt_tokens),
-            prefix_hit_length=prefix_hit_length,
-            prefix_cache_hit=prefix_cache_hit,
-        )
+            log_generation_memory(
+                "batch_prefill_done",
+                task_params,
+                prompt_tokens=len(all_prompt_tokens),
+                uncached_prompt_tokens=len(prompt_tokens),
+                prefix_hit_length=prefix_hit_length,
+                prefix_cache_hit=prefix_cache_hit,
+            )
+        else:
+            if on_prefill_progress is not None:
+                on_prefill_progress(0, len(prompt_tokens))
+            log_generation_memory(
+                "batch_prefill_queued",
+                task_params,
+                prompt_tokens=len(all_prompt_tokens),
+                uncached_prompt_tokens=len(prompt_tokens),
+                prefix_hit_length=prefix_hit_length,
+                prefix_cache_hit=prefix_cache_hit,
+            )
 
         if matched_index is not None and prefix_hit_length > 0:
             assert self.kv_prefix_cache is not None
@@ -354,7 +403,7 @@ class ExoBatchGenerator:
                 c.values = c._trim(trim_size, c.values)
                 c._idx = c.max_size
 
-        if not is_bench or task_params.use_prefix_cache:
+        if use_legacy_prefill and (not is_bench or task_params.use_prefix_cache):
             min_prefix_hit_length = max(
                 1000, system_prompt_token_count(task_params, self.tokenizer)
             )
@@ -378,7 +427,14 @@ class ExoBatchGenerator:
                 prefix_cache_hit=prefix_cache_hit,
             )
 
-        last_tokens = prompt_tokens[-2:]
+        batch_prompt_tokens = (
+            prompt_tokens if len(prompt_tokens) > 0 else all_prompt_tokens[-1:]
+        )
+        if use_legacy_prefill:
+            batch_prompt_tokens = prompt_tokens[-2:]
+        batch_prompt_prefix_tokens = all_prompt_tokens[
+            : len(all_prompt_tokens) - len(batch_prompt_tokens)
+        ]
 
         logits_processors: list[Callable[[mx.array, mx.array], mx.array]] = (
             make_logits_processors(
@@ -396,9 +452,10 @@ class ExoBatchGenerator:
             logits_processors = [ban_token_ids(eos_ids)] + logits_processors
 
         uids = self._mlx_gen.insert(
-            prompts=[cast(list[int], last_tokens.tolist())],
+            prompts=[cast(list[int], batch_prompt_tokens.tolist())],
             max_tokens=[max_tokens],
             caches=[list(cache)],
+            all_tokens=[cast(list[int], batch_prompt_prefix_tokens.tolist())],
             samplers=[sampler],
             logits_processors=[logits_processors],
         )
@@ -419,9 +476,70 @@ class ExoBatchGenerator:
             prefill_tps=_prefill_tps,
             prefix_cache_hit=prefix_cache_hit,
             media_regions=media_regions,
+            on_prefill_progress=on_prefill_progress,
+            prompt_start_time=time.perf_counter(),
+            uncached_prompt_tokens=len(prompt_tokens),
+            cache_snapshots=cache_snapshots,
+            prefix_cache_saved=use_legacy_prefill,
         )
 
         return uid
+
+    def _handle_prompt_response(self, uid: int, response: object) -> None:
+        state = self._active_tasks.get(uid)
+        if state is None:
+            logger.warning(f"prompt response uid {uid} was not found - should be active")
+            return
+
+        progress = getattr(response, "progress", (0, 0))
+        processed, total = int(progress[0]), int(progress[1])
+        if state.on_prefill_progress is not None:
+            state.on_prefill_progress(processed, total)
+
+        if not bool(getattr(response, "end_of_prompt", False)):
+            return
+        if state.prefix_cache_saved:
+            return
+
+        elapsed = max(time.perf_counter() - state.prompt_start_time, 1e-9)
+        state.prefill_tps = state.uncached_prompt_tokens / elapsed
+        log_generation_memory(
+            "batch_prefill_done",
+            state.task_params,
+            prompt_tokens=len(state.all_prompt_tokens),
+            uncached_prompt_tokens=state.uncached_prompt_tokens,
+            prefix_hit_length=state.prefix_hit_length,
+            prefix_cache_hit=state.prefix_cache_hit,
+        )
+
+        if not state.task_params.bench or state.task_params.use_prefix_cache:
+            extracted = self._mlx_gen.extract_cache([uid]).get(uid)
+            if extracted is not None:
+                cache, _tokens = extracted
+                min_prefix_hit_length = max(
+                    1000,
+                    system_prompt_token_count(state.task_params, self.tokenizer),
+                )
+                self._save_prefix_cache(
+                    state.all_prompt_tokens,
+                    list(cache),
+                    state.cache_snapshots,
+                    state.prefix_hit_length,
+                    state.matched_index,
+                    min_prefix_hit_length,
+                    state.media_regions,
+                    cache_slot=state.task_params.cache_slot,
+                    prefill_tps=state.prefill_tps,
+                )
+                log_generation_memory(
+                    "batch_prefix_cache_saved",
+                    state.task_params,
+                    prompt_tokens=len(state.all_prompt_tokens),
+                    uncached_prompt_tokens=state.uncached_prompt_tokens,
+                    prefix_hit_length=state.prefix_hit_length,
+                    prefix_cache_hit=state.prefix_cache_hit,
+                )
+        state.prefix_cache_saved = True
 
     def step(self) -> list[tuple[int, GenerationResponse]]:
         if not self.has_work:
@@ -433,12 +551,15 @@ class ExoBatchGenerator:
             any(t.task_params.logprobs for t in self._active_tasks.values()),
         )
         _step_tic = time.perf_counter()
-        _, responses = self._mlx_gen.next()
+        prompt_responses, responses = self._mlx_gen.next()
         _next_elapsed = time.perf_counter() - _step_tic
 
         topk = take_ready_topk(gb)
 
         results: list[tuple[int, GenerationResponse]] = []
+
+        for prompt_response in prompt_responses:
+            self._handle_prompt_response(prompt_response.uid, prompt_response)
 
         for response in responses:
             if response.uid not in self._active_tasks:
