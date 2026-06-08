@@ -43,3 +43,6 @@ tmp/models
 /.claude
 /.codex
 skills-lock.json
+
+# local machine config
+.env

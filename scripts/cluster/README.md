@@ -3,19 +3,40 @@
 This cluster helper starts and stops Exo on LAN machines without running Exo
 inside Docker.
 
-Architecture:
+Architecture with the Exo dashboard button:
 
 ```text
-controller machine
-  controller API
-    -> node agent container on each GPU host
-       -> writes command file in /var/lib/exo-agent/commands
-          -> host systemd path/service runs exo-agent-runner.sh
-             -> starts/stops ~/exo/scripts/start_exo_detached.sh on the host
+Exo master dashboard
+  Start Children button
+    -> Exo API scans EXO_CLUSTER_AGENT_CIDRS
+       -> node agent container on each GPU host
+          -> writes command file in /var/lib/exo-agent/commands
+             -> host systemd path/service runs exo-agent-runner.sh
+                -> starts/stops ~/exo/scripts/start_exo_detached.sh on the host
 ```
 
 The Docker container is only a signaling layer. GPU, CUDA, MLX, tmux and the
 Python venv stay on the host.
+
+## Configure the master
+
+On the machine that has Wi-Fi and access to the dedicated switch network:
+
+```bash
+cp .env.example .env
+```
+
+Set the dedicated switch CIDR:
+
+```bash
+EXO_CLUSTER_MASTER=true
+EXO_CLUSTER_AGENT_CIDRS=10.10.10.0/24
+EXO_CLUSTER_AGENT_PORT=8765
+```
+
+After Exo starts on this machine, the dashboard header shows `Start Children`.
+Clicking it discovers node agents on the switch network and sends `start` to
+all child nodes. No manual `curl` is needed.
 
 ## Install on each GPU host
 
@@ -37,12 +58,10 @@ Start the node agent container:
 ```bash
 cd scripts/cluster
 EXO_NODE_NAME="$(hostname)" \
-EXO_CONTROLLER_URL="http://10.10.10.1:8766" \
 docker compose -f docker-compose.node.yml up -d --build
 ```
 
-With `EXO_CONTROLLER_URL` set, the node agent advertises the IP address of the
-interface that reaches the controller. On unusual routing setups, force it:
+On unusual routing setups, force the IP that the Exo master should use:
 
 ```bash
 EXO_AGENT_ADVERTISE_HOST="10.10.10.2" docker compose -f docker-compose.node.yml up -d
@@ -54,11 +73,12 @@ If you want a shared token:
 export EXO_AGENT_TOKEN="change-me"
 ```
 
-Use the same token on controller and nodes.
+Use the same token in the master's `.env` and in node containers.
 
-## Start the controller
+## Optional standalone controller
 
-On the machine that has Wi-Fi and access to the dedicated switch network:
+The dashboard no longer needs this for normal operation, but the standalone
+controller is still useful for debugging the node agents without running Exo:
 
 ```bash
 cd scripts/cluster

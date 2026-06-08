@@ -29,6 +29,10 @@ Hoje o comportamento ruim observado e:
       `scripts/start_exo_detached.sh`;
     - `scripts/cluster/controller.py` registra nodes e envia comandos para um
       node especifico ou para todos;
+    - API principal do Exo le `.env`, descobre node agents na LAN e expoe
+      `/cluster/config`, `/cluster/agents` e `/cluster/children/start`;
+    - dashboard mostra botao `Start Children` somente no mestre;
+    - `.env.example` documenta `EXO_CLUSTER_MASTER` e CIDR da rede dedicada;
     - Compose separado para node agent e controller;
     - README com bootstrap, comandos `start/stop/restart/pull/status` e nota de
       rede dedicada.

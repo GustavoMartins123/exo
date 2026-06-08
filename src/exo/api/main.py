@@ -46,6 +46,14 @@ from exo.api.adapters.responses import (
     generate_responses_stream,
     responses_request_to_text_generation,
 )
+from exo.api.cluster_control import (
+    ClusterAgentStatus,
+    ClusterChildrenStartResponse,
+    ClusterConfig,
+    cluster_config,
+    discover_cluster_agents,
+    start_cluster_children,
+)
 from exo.api.keepalive import with_sse_keepalive
 from exo.api.types import (
     AddCustomModelParams,
@@ -383,6 +391,9 @@ class API:
         self.app.post("/v1/cancel/{command_id}")(self.cancel_command)
         self.app.post("/v1/cache/clear")(self.clear_cache)
         self.app.post("/admin/cache/clear")(self.clear_cache)
+        self.app.get("/cluster/config")(self.get_cluster_config)
+        self.app.get("/cluster/agents")(self.get_cluster_agents)
+        self.app.post("/cluster/children/start")(self.start_cluster_children)
 
         # Ollama API
         self.app.head("/ollama/")(self.ollama_version)
@@ -775,6 +786,23 @@ class API:
             model=str(validated_model),
             cache_slot=payload.cache_slot,
         )
+
+    async def get_cluster_config(self) -> ClusterConfig:
+        return cluster_config()
+
+    async def get_cluster_agents(self) -> list[ClusterAgentStatus]:
+        if not cluster_config().is_master:
+            return []
+        return await discover_cluster_agents()
+
+    async def start_cluster_children(self) -> ClusterChildrenStartResponse:
+        result = await start_cluster_children()
+        if not result.is_master:
+            raise HTTPException(
+                status_code=403,
+                detail="This Exo node is not configured as the cluster master.",
+            )
+        return result
 
     async def _token_chunk_stream(
         self, command_id: CommandId

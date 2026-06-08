@@ -1,6 +1,8 @@
 <script lang="ts">
   import { browser } from "$app/environment";
   import { featureFlags } from "$lib/stores/app.svelte";
+  import { addToast } from "$lib/stores/toast.svelte";
+  import { onMount } from "svelte";
 
   const showAdvanced = $derived(featureFlags()["disaggregation"] === true);
 
@@ -37,6 +39,37 @@
     downloadProgress = null,
   }: Props = $props();
 
+  type ClusterCommandResult = {
+    ok: boolean;
+    node: string;
+    host: string;
+    error?: string | null;
+  };
+
+  type ClusterChildrenStartResponse = {
+    is_master: boolean;
+    discovered: Array<{ node: string; host: string; is_self?: boolean }>;
+    results: ClusterCommandResult[];
+  };
+
+  let clusterIsMaster = $state(false);
+  let clusterStarting = $state(false);
+
+  onMount(() => {
+    void loadClusterConfig();
+  });
+
+  async function loadClusterConfig(): Promise<void> {
+    try {
+      const response = await fetch("/cluster/config");
+      if (!response.ok) return;
+      const config = (await response.json()) as { is_master?: boolean };
+      clusterIsMaster = config.is_master === true;
+    } catch {
+      clusterIsMaster = false;
+    }
+  }
+
   function handleHome(): void {
     if (onHome) {
       onHome();
@@ -63,6 +96,44 @@
   function handleToggleMobileRight(): void {
     if (onToggleMobileRight) {
       onToggleMobileRight();
+    }
+  }
+
+  async function startClusterChildren(): Promise<void> {
+    if (clusterStarting) return;
+    clusterStarting = true;
+    try {
+      const response = await fetch("/cluster/children/start", { method: "POST" });
+      const payload = (await response.json()) as ClusterChildrenStartResponse & {
+        detail?: string;
+      };
+      if (!response.ok) {
+        addToast({
+          type: "error",
+          message: payload.detail ?? "Failed to start child nodes",
+        });
+        return;
+      }
+      const okCount = payload.results.filter((result) => result.ok).length;
+      const failCount = payload.results.length - okCount;
+      if (payload.results.length === 0) {
+        addToast({
+          type: "warning",
+          message: "No child agents found on the local network",
+        });
+        return;
+      }
+      addToast({
+        type: failCount > 0 ? "warning" : "success",
+        message:
+          failCount > 0
+            ? `Started ${okCount} child nodes, ${failCount} failed`
+            : `Start sent to ${okCount} child nodes`,
+      });
+    } catch {
+      addToast({ type: "error", message: "Failed to start child nodes" });
+    } finally {
+      clusterStarting = false;
     }
   }
 </script>
@@ -221,6 +292,36 @@
           />
         </svg>
         <span class="hidden sm:inline">Home</span>
+      </button>
+    {/if}
+    {#if clusterIsMaster}
+      <button
+        type="button"
+        onclick={startClusterChildren}
+        disabled={clusterStarting}
+        class="text-xs md:text-sm text-white/70 hover:text-exo-yellow disabled:text-white/30 disabled:cursor-wait transition-colors tracking-wider uppercase flex items-center gap-1.5 md:gap-2 cursor-pointer"
+        title="Start child Exo nodes"
+      >
+        <svg
+          class="w-4 h-4"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <circle cx="12" cy="5" r="2" />
+          <circle cx="5" cy="19" r="2" />
+          <circle cx="19" cy="19" r="2" />
+          <path d="M12 7v4" />
+          <path d="M12 11L5 17" />
+          <path d="M12 11l7 6" />
+          <path d="M8 19h8" />
+        </svg>
+        <span class="hidden lg:inline">
+          {clusterStarting ? "Starting" : "Start Children"}
+        </span>
       </button>
     {/if}
     <a
