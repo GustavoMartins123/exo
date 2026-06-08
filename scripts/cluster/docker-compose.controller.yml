@@ -1,0 +1,12 @@
+services:
+  exo-cluster-controller:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: exo-node-agent:local
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      EXO_CONTROLLER_PORT: ${EXO_CONTROLLER_PORT:-8766}
+      EXO_AGENT_TOKEN: ${EXO_AGENT_TOKEN:-}
+    command: ["python", "/app/controller.py"]

@@ -1,0 +1,18 @@
+services:
+  exo-node-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: exo-node-agent:local
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      EXO_NODE_NAME: ${EXO_NODE_NAME:-}
+      EXO_AGENT_PORT: ${EXO_AGENT_PORT:-8765}
+      EXO_AGENT_TOKEN: ${EXO_AGENT_TOKEN:-}
+      EXO_CONTROLLER_URL: ${EXO_CONTROLLER_URL:-}
+      EXO_AGENT_ADVERTISE_HOST: ${EXO_AGENT_ADVERTISE_HOST:-}
+      EXO_AGENT_SHARED_DIR: /var/lib/exo-agent
+    volumes:
+      - /var/lib/exo-agent:/var/lib/exo-agent
+    command: ["python", "/app/node_agent.py"]

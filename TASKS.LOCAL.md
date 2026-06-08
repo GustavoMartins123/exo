@@ -18,6 +18,21 @@ Hoje o comportamento ruim observado e:
 - o cache prefixado existe, mas a pressao usada para eviction parece baseada em
   RAM do sistema, nao em VRAM CUDA.
 
+## Infra local - Orquestracao das maquinas no switch
+
+- [x] Criar sinalizacao para subir/parar Exo nas maquinas da LAN sem rodar Exo
+  dentro de Docker.
+  - Feito:
+    - `scripts/cluster/node_agent.py` roda em Docker e recebe comandos HTTP;
+    - o container grava comandos em `/var/lib/exo-agent/commands`;
+    - `scripts/cluster/exo-agent-runner.sh` roda no host via systemd e executa
+      `scripts/start_exo_detached.sh`;
+    - `scripts/cluster/controller.py` registra nodes e envia comandos para um
+      node especifico ou para todos;
+    - Compose separado para node agent e controller;
+    - README com bootstrap, comandos `start/stop/restart/pull/status` e nota de
+      rede dedicada.
+
 ## Prioridade 0 - Reproduzir e medir antes de alterar
 
 - [ ] Criar um teste manual fixo com o payload pequeno do front.

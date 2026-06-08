@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch queued Exo host commands from exo-agent
+
+[Path]
+PathExistsGlob=/var/lib/exo-agent/commands/*.cmd
+Unit=exo-agent-runner.service
+
+[Install]
+WantedBy=multi-user.target

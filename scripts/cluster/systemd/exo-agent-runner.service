@@ -1,0 +1,8 @@
+[Unit]
+Description=Run queued Exo host commands from exo-agent
+
+[Service]
+Type=oneshot
+Environment=EXO_AGENT_SHARED_DIR=/var/lib/exo-agent
+Environment=EXO_DIR=%h/exo
+ExecStart=/usr/local/bin/exo-agent-runner.sh drain
