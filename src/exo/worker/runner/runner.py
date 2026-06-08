@@ -367,9 +367,7 @@ class Runner:
                         finished.append(task_id)
                     case RecoverableErrorResponse():
                         self.update_status(
-                            RunnerRecoverableError(
-                                error_message=result.error_message
-                            )
+                            RunnerRecoverableError(error_message=result.error_message)
                         )
                     case other:
                         self.send_chunk(other, self.active_tasks[task_id].command_id)

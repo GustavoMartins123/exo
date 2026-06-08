@@ -578,6 +578,14 @@ Hoje o comportamento ruim observado e:
 
 ## Incidentes corrigidos
 
+- [x] Corrigir falha de CI `treefmt-check`.
+  - Sintoma:
+    - `nix flake check` falhava em `checks.*.treefmt`;
+    - diff exigia formatacao em `runner.py` e
+      `test_recoverable_error_status.py`.
+  - Correcao:
+    - aplicado o formato esperado pelo treefmt nos dois trechos apontados.
+
 - [x] Corrigir conflito PyTorch/NCCL ao iniciar pelo script detached.
   - Sintoma:
     - `libtorch_cuda.so: undefined symbol: ncclCommResume`.

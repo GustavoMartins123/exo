@@ -138,8 +138,10 @@ def test_recoverable_error_status_returns_to_ready() -> None:
         if isinstance(event.runner_status, RunnerRecoverableError):
             saw_recoverable = True
             return
-        if saw_recoverable and not sent_shutdown and isinstance(
-            event.runner_status, RunnerReady
+        if (
+            saw_recoverable
+            and not sent_shutdown
+            and isinstance(event.runner_status, RunnerReady)
         ):
             sent_shutdown = True
             task_sender.send(
