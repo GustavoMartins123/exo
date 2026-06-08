@@ -74,6 +74,9 @@ There are two ways to run exo:
 
 ### Run from Source (macOS)
 
+For a detailed Mac Studio runbook, including Xcode/Metal Toolchain fixes, see
+[`docs/macos-mac-studio-setup.md`](docs/macos-mac-studio-setup.md).
+
 If you have [Nix](https://nixos.org/) installed, you can skip most of the steps below and run exo directly:
 
 ```bash

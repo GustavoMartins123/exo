@@ -52,6 +52,17 @@ Hoje o comportamento ruim observado e:
     - runner reporta memoria unificada Apple Silicon no status quando nao ha
       `nvidia-smi`.
 
+- [x] Documentar setup manual do Mac Studio.
+  - Feito em `docs/macos-mac-studio-setup.md`.
+  - Inclui:
+    - instalacao de Xcode e aceite de licenca;
+    - validacao de `xcrun -sdk macosx metal --version`;
+    - recuperacao quando falta `MetalToolchain`;
+    - workaround manual com `hdiutil attach` e `Metal.xctoolchain`;
+    - build do dashboard com `cd dashboard`, sem `/dashboard`;
+    - start manual com `scripts/start_exo_detached.sh`;
+    - validacao do MLX via `uv run --extra mlx`.
+
 ## Prioridade 0 - Reproduzir e medir antes de alterar
 
 - [ ] Criar um teste manual fixo com o payload pequeno do front.
