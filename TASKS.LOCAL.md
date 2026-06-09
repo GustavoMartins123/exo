@@ -73,6 +73,14 @@ Hoje o comportamento ruim observado e:
     - painel `Machines` no sidebar mostra totais por tipo e uso por
       maquina/dispositivo.
 
+- [x] Documentar e imprimir comandos para parar Exo detached.
+  - Feito:
+    - `scripts/start_exo_detached.sh` agora imprime comando para parar via
+      `tmux kill-session -t exo`;
+    - fallback `nohup` imprime comando para parar pelo pid file;
+    - `docs/start-stop-exo.md` concentra start, attach, stop, pid e logs;
+    - setup do Mac aponta para essa doc.
+
 ## Prioridade 0 - Reproduzir e medir antes de alterar
 
 - [ ] Criar um teste manual fixo com o payload pequeno do front.

@@ -132,6 +132,10 @@ Watch startup:
 tail -f ~/.cache/exo/exo.detached.log
 ```
 
+Stop commands for `tmux` or pid-file launches are in
+[`docs/start-stop-exo.md`](start-stop-exo.md). The detached starter also prints
+the matching stop command after startup.
+
 If dependency installation failed halfway, remove the partial virtualenv and
 start again:
 

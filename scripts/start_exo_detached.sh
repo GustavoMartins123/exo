@@ -40,17 +40,23 @@ if command -v tmux >/dev/null 2>&1; then
   if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
     echo "tmux session already running: $SESSION_NAME"
     echo "attach with: tmux attach -t $SESSION_NAME"
+    echo "stop with: tmux kill-session -t $SESSION_NAME"
+    echo "docs: docs/start-stop-exo.md"
     exit 0
   fi
 
   tmux new-session -d -s "$SESSION_NAME" "$COMMAND"
   echo "started exo in tmux session: $SESSION_NAME"
   echo "attach with: tmux attach -t $SESSION_NAME"
+  echo "stop with: tmux kill-session -t $SESSION_NAME"
+  echo "docs: docs/start-stop-exo.md"
   exit 0
 fi
 
 if pgrep -f "uv run --extra $EXO_EXTRA exo" >/dev/null 2>&1; then
   echo "exo appears to already be running"
+  echo "stop with pid file: kill \"\$(cat $LOG_DIR/exo.detached.pid)\""
+  echo "docs: docs/start-stop-exo.md"
   exit 0
 fi
 
@@ -58,3 +64,6 @@ nohup bash -lc "$COMMAND" >>"$LOG_FILE" 2>&1 &
 echo "$!" >"$LOG_DIR/exo.detached.pid"
 echo "started exo with nohup, pid: $(cat "$LOG_DIR/exo.detached.pid")"
 echo "log: $LOG_FILE"
+echo "stop with pid file: kill \"\$(cat $LOG_DIR/exo.detached.pid)\""
+echo "force stop with pid file: kill -9 \"\$(cat $LOG_DIR/exo.detached.pid)\""
+echo "docs: docs/start-stop-exo.md"
