@@ -1,7 +1,7 @@
 import gc
 import os
 from copy import deepcopy
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Callable, Literal, cast
 
 import mlx.core as mx
 import numpy as np
@@ -639,6 +639,39 @@ def get_memory_used_percentage() -> float:
     return float(mem.percent / 100)
 
 
+def _make_mask_compat(
+    make_mask: Callable[..., mx.array | Literal["causal"] | None],
+    n: int,
+    kwargs: dict[str, object],
+) -> mx.array | Literal["causal"] | None:
+    try:
+        return make_mask(n, **kwargs)
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return make_mask(n)
+
+
+def _patch_arrays_cache_make_mask(entry: ArraysCache) -> None:
+    orig_make_mask = entry.make_mask
+    entry.make_mask = lambda n, **kw: _make_mask_compat(  # type: ignore
+        orig_make_mask,
+        n,
+        kw,
+    )
+
+
+def _patch_cache_make_mask_compat(cache: KVCacheType) -> None:
+    for entry in cache:
+        if isinstance(entry, ArraysCache):
+            _patch_arrays_cache_make_mask(entry)
+            continue
+        if isinstance(entry, CacheList):
+            for inner in entry:
+                if isinstance(inner, ArraysCache):
+                    _patch_arrays_cache_make_mask(inner)
+
+
 def make_kv_cache(
     model: Model, max_kv_size: int | None = None, keep: int = 0
 ) -> KVCacheType:
@@ -647,6 +680,7 @@ def make_kv_cache(
     if hasattr(model, "make_cache"):
         logger.info("Using MLX LM's make cache")
         cache = cast(KVCacheType, model.make_cache())  # type: ignore
+        _patch_cache_make_mask_compat(cache)
         clamp_kv_cache_max_size(cache, max_kv_size)
         return cache
 
