@@ -265,16 +265,28 @@ def _patch_hybrid_cache(
                 raise
             return make_mask(n)
 
+    def _patch_arrays_cache_mask(entry: ArraysCache) -> None:
+        orig_make_mask = entry.make_mask
+        entry.make_mask = lambda n, **kw: _make_mask_compat(  # type: ignore
+            orig_make_mask,
+            n,
+            kw,
+        )
+
     def patched() -> list[ArraysCache | KVCache]:
         cache = original()
+        for entry in cache:
+            if isinstance(entry, ArraysCache):
+                _patch_arrays_cache_mask(entry)
         if not has_full_attn:
             entry = cache[fa_idx]
-            orig_make_mask = entry.make_mask
-            entry.make_mask = lambda n, **kw: _make_mask_compat(  # type: ignore
-                orig_make_mask,
-                n,
-                kw,
-            )
+            if not isinstance(entry, ArraysCache):
+                orig_make_mask = entry.make_mask
+                entry.make_mask = lambda n, **kw: _make_mask_compat(  # type: ignore
+                    orig_make_mask,
+                    n,
+                    kw,
+                )
         if not has_linear:
             orig_ssm_make_mask = cache[ssm_idx].make_mask
 

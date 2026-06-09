@@ -133,6 +133,16 @@ Hoje o comportamento ruim observado e:
     - teste cobre memoria parecida com o cluster real: 8.65GB, 8.85GB, 19.38GB
       e 74.19GB disponiveis.
 
+- [x] Corrigir warmup de shards hibridos com `ArraysCache`.
+  - Feito:
+    - `auto_parallel._patch_hybrid_cache` agora adapta todo `ArraysCache` criado
+      pelo `make_cache` hibrido para aceitar kwargs novos do MLX, como
+      `return_array`;
+    - se a implementacao antiga do cache nao aceitar o kwarg, o wrapper refaz a
+      chamada com a assinatura antiga `make_mask(n)`;
+    - isso cobre tambem shards que contem full attention e linear/SSM ao mesmo
+      tempo, que antes passavam sem patch.
+
 ## Prioridade 0 - Reproduzir e medir antes de alterar
 
 - [ ] Criar um teste manual fixo com o payload pequeno do front.
