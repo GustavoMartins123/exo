@@ -236,7 +236,7 @@ def place_instance(
                 cycle, command.model_card.model_id, resolved_download_status
             ),
             sum(
-                (node_memory[node_id].ram_available for node_id in cycle),
+                (node_memory[node_id].inference_available for node_id in cycle),
                 start=Memory(),
             ),
         ),

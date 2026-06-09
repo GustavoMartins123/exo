@@ -9,6 +9,7 @@ from exo.master.placement_utils import (
     get_smallest_cycles,
 )
 from exo.master.tests.conftest import (
+    create_node_accelerator_memory,
     create_node_memory,
     create_socket_connection,
 )
@@ -277,6 +278,61 @@ def test_get_shard_assignments(
         - shard_assignments.runner_to_shard[runner_id_c].start_layer
         == expected_layers[2]
     )
+
+
+def test_pipeline_shards_use_accelerator_memory_before_system_ram():
+    node_3060_a = NodeId()
+    node_3060_b = NodeId()
+    node_a5000 = NodeId()
+    node_mac = NodeId()
+
+    topology = Topology()
+    for node_id in (node_3060_a, node_3060_b, node_a5000, node_mac):
+        topology.add_node(node_id)
+
+    node_ids = [node_3060_a, node_3060_b, node_a5000, node_mac]
+    for index, source in enumerate(node_ids):
+        topology.add_connection(
+            Connection(
+                source=source,
+                sink=node_ids[(index + 1) % len(node_ids)],
+                edge=create_socket_connection(index + 1),
+            )
+        )
+
+    node_memory = {
+        node_3060_a: create_node_accelerator_memory(12 * 1024),
+        node_3060_b: create_node_accelerator_memory(12 * 1024),
+        node_a5000: create_node_accelerator_memory(24 * 1024),
+        node_mac: create_node_accelerator_memory(
+            96 * 1024, kind="apple_unified"
+        ),
+    }
+
+    model_card = ModelCard(
+        model_id=ModelId("test-model"),
+        n_layers=48,
+        storage_size=Memory.from_kb(144),
+        hidden_size=1000,
+        supports_tensor=True,
+        tasks=[ModelTask.TextGeneration],
+        backends=[Backend.MlxMetal],
+    )
+
+    selected_cycle = next(cycle for cycle in topology.get_cycles() if len(cycle) == 4)
+    assignments = get_shard_assignments(
+        model_card, selected_cycle, Sharding.Pipeline, node_memory=node_memory
+    )
+
+    layers_by_node: dict[NodeId, int] = {}
+    for node_id, runner_id in assignments.node_to_runner.items():
+        shard = assignments.runner_to_shard[runner_id]
+        layers_by_node[node_id] = shard.end_layer - shard.start_layer
+
+    assert layers_by_node[node_mac] == 32
+    assert layers_by_node[node_a5000] == 8
+    assert layers_by_node[node_3060_a] == 4
+    assert layers_by_node[node_3060_b] == 4
 
 
 def test_get_mlx_jaccl_coordinators():

@@ -29,7 +29,10 @@ def filter_cycles_by_memory(
             continue
 
         total_mem = sum(
-            (node_memory[node_id].ram_available for node_id in cycle.node_ids),
+            (
+                node_memory[node_id].inference_available
+                for node_id in cycle.node_ids
+            ),
             start=Memory(),
         )
         if total_mem >= required_memory:
@@ -85,7 +88,7 @@ def _compute_total_memory(
     node_memory: Mapping[NodeId, MemoryUsage],
 ) -> Memory:
     total_memory = sum(
-        (node_memory[node_id].ram_available for node_id in node_ids),
+        (node_memory[node_id].inference_available for node_id in node_ids),
         start=Memory(),
     )
     if total_memory.in_bytes == 0:
@@ -102,7 +105,8 @@ def _allocate_and_validate_layers(
     layer_allocations = allocate_layers_proportionally(
         total_layers=model_card.n_layers,
         memory_fractions=[
-            node_memory[node_id].ram_available / total_memory for node_id in node_ids
+            node_memory[node_id].inference_available / total_memory
+            for node_id in node_ids
         ],
     )
 
@@ -111,7 +115,7 @@ def _allocate_and_validate_layers(
     for i, node_id in enumerate(node_ids):
         node_layers = layer_allocations[i]
         required_memory = (total_storage * node_layers) // total_layers
-        available_memory = node_memory[node_id].ram_available
+        available_memory = node_memory[node_id].inference_available
         if required_memory > available_memory:
             raise ValueError(
                 f"Node {i} ({node_id}) has insufficient memory: "

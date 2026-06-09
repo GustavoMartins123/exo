@@ -125,6 +125,17 @@ class MemoryUsage(FrozenModel):
     swap_available: Memory
     accelerators: Sequence[MemoryDeviceUsage] = ()
 
+    @property
+    def accelerator_available(self) -> Memory:
+        return sum((device.available for device in self.accelerators), start=Memory())
+
+    @property
+    def inference_available(self) -> Memory:
+        accelerator_available = self.accelerator_available
+        if accelerator_available.in_bytes > 0:
+            return accelerator_available
+        return self.ram_available
+
     @classmethod
     def from_bytes(
         cls,

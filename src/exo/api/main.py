@@ -1827,7 +1827,7 @@ class API:
         total_available = Memory()
 
         for memory in self.state.node_memory.values():
-            total_available += memory.ram_available
+            total_available += memory.inference_available
 
         return total_available
 

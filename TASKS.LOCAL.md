@@ -81,6 +81,16 @@ Hoje o comportamento ruim observado e:
     - `docs/start-stop-exo.md` concentra start, attach, stop, pid e logs;
     - setup do Mac aponta para essa doc.
 
+- [x] Corrigir placement para usar memoria de inferencia, nao RAM do sistema.
+  - Feito:
+    - `MemoryUsage.inference_available` usa VRAM CUDA quando disponivel;
+    - em Apple Silicon usa memoria unificada reportada pelo macmon;
+    - RAM do sistema fica apenas como fallback;
+    - filtros de ciclo, score de ciclo, validacao e distribuicao proporcional de
+      camadas agora usam `inference_available`;
+    - teste cobre cluster 12GB/12GB/24GB/96GB e garante mais camadas na A5000 e
+      Mac, menos nas 3060.
+
 ## Prioridade 0 - Reproduzir e medir antes de alterar
 
 - [ ] Criar um teste manual fixo com o payload pequeno do front.
