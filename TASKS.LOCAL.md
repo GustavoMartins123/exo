@@ -63,6 +63,16 @@ Hoje o comportamento ruim observado e:
     - start manual com `scripts/start_exo_detached.sh`;
     - validacao do MLX via `uv run --extra mlx`.
 
+- [x] Mostrar memoria por maquina no dashboard.
+  - Feito:
+    - `MemoryUsage` agora inclui lista de aceleradores com nome, tipo, total,
+      livre, usado e percentual;
+    - Linux/NVIDIA coleta VRAM por GPU via NVML quando disponivel;
+    - macOS/macmon reporta memoria unificada Apple Silicon como acelerador;
+    - dashboard guarda `nodeMemory` no store;
+    - painel `Machines` no sidebar mostra totais por tipo e uso por
+      maquina/dispositivo.
+
 ## Prioridade 0 - Reproduzir e medir antes de alterar
 
 - [ ] Criar um teste manual fixo com o payload pequeno do front.

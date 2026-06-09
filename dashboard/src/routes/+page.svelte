@@ -64,9 +64,12 @@
     thunderboltBridgeCycles,
     nodeThunderboltBridge,
     nodeIdentities,
+    nodeMemory,
     isConnected,
     type DownloadProgress,
     type PlacementPreview,
+    type RawMemoryDeviceUsage,
+    type RawMemoryUsage,
   } from "$lib/stores/app.svelte";
   import { addToast, dismissByMessage } from "$lib/stores/toast.svelte";
   import HeaderNav from "$lib/components/HeaderNav.svelte";
@@ -94,9 +97,40 @@
   const tbBridgeCycles = $derived(thunderboltBridgeCycles());
   const tbBridgeData = $derived(nodeThunderboltBridge());
   const identitiesData = $derived(nodeIdentities());
+  const memoryData = $derived(nodeMemory());
   const tbIdentifiers = $derived(nodeThunderbolt());
   const rdmaCtlData = $derived(nodeRdmaCtl());
   const nodeFilter = $derived(previewNodeFilter());
+
+  interface MachineMemoryDevice {
+    nodeId: string;
+    nodeName: string;
+    name: string;
+    kind: "cuda_vram" | "apple_unified" | "system_ram";
+    totalBytes: number;
+    availableBytes: number;
+    usedBytes: number;
+    usedPercent: number;
+    index: number | null;
+  }
+
+  interface MachineMemoryGroup {
+    nodeId: string;
+    nodeName: string;
+    devices: MachineMemoryDevice[];
+    totalBytes: number;
+    availableBytes: number;
+    usedBytes: number;
+    usedPercent: number;
+  }
+
+  interface MachineMemorySummary {
+    kind: MachineMemoryDevice["kind"];
+    totalBytes: number;
+    availableBytes: number;
+    usedBytes: number;
+    usedPercent: number;
+  }
 
   // Aggregate active download progress across all instances for header indicator
   const activeDownloadSummary = $derived.by(() => {
@@ -242,6 +276,165 @@
     }
     return "Thunderbolt Bridge"; // Fallback if no service name found
   }
+
+  function memoryBytes(value?: { inBytes: number }): number {
+    return value?.inBytes ?? 0;
+  }
+
+  function memoryKindLabel(kind: MachineMemoryDevice["kind"]): string {
+    switch (kind) {
+      case "cuda_vram":
+        return "CUDA VRAM";
+      case "apple_unified":
+        return "UNIFIED";
+      case "system_ram":
+        return "RAM";
+    }
+  }
+
+  function memoryBarColor(kind: MachineMemoryDevice["kind"]): string {
+    switch (kind) {
+      case "cuda_vram":
+        return "from-green-500 to-green-400";
+      case "apple_unified":
+        return "from-exo-yellow to-yellow-300";
+      case "system_ram":
+        return "from-blue-500 to-blue-400";
+    }
+  }
+
+  function deviceFromRaw(
+    nodeId: string,
+    nodeName: string,
+    device: RawMemoryDeviceUsage,
+  ): MachineMemoryDevice | null {
+    const kind = device.kind ?? "system_ram";
+    const totalBytes = memoryBytes(device.total);
+    const availableBytes = memoryBytes(device.available);
+    if (totalBytes <= 0) return null;
+
+    const usedBytes =
+      memoryBytes(device.used) || Math.max(totalBytes - availableBytes, 0);
+    const usedPercent =
+      typeof device.usedPercent === "number"
+        ? device.usedPercent
+        : (usedBytes / totalBytes) * 100;
+
+    return {
+      nodeId,
+      nodeName,
+      name:
+        device.name ||
+        (kind === "cuda_vram"
+          ? `CUDA ${device.index ?? ""}`.trim()
+          : memoryKindLabel(kind)),
+      kind,
+      totalBytes,
+      availableBytes,
+      usedBytes,
+      usedPercent: Math.min(100, Math.max(0, usedPercent)),
+      index: device.index ?? null,
+    };
+  }
+
+  function fallbackRamDevice(
+    nodeId: string,
+    nodeName: string,
+    memory: RawMemoryUsage,
+  ): MachineMemoryDevice | null {
+    const totalBytes = memoryBytes(memory.ramTotal);
+    const availableBytes = memoryBytes(memory.ramAvailable);
+    if (totalBytes <= 0) return null;
+    const usedBytes = Math.max(totalBytes - availableBytes, 0);
+    return {
+      nodeId,
+      nodeName,
+      name: "System RAM",
+      kind: "system_ram",
+      totalBytes,
+      availableBytes,
+      usedBytes,
+      usedPercent: Math.min(100, Math.max(0, (usedBytes / totalBytes) * 100)),
+      index: null,
+    };
+  }
+
+  function buildMachineMemoryGroups(
+    memoryByNode: Record<string, RawMemoryUsage>,
+  ): MachineMemoryGroup[] {
+    return Object.entries(memoryByNode)
+      .map(([nodeId, memory]) => {
+        const nodeName = getNodeName(nodeId);
+        const acceleratorDevices = (memory.accelerators ?? [])
+          .map((device) => deviceFromRaw(nodeId, nodeName, device))
+          .filter((device): device is MachineMemoryDevice => device !== null);
+        const devices =
+          acceleratorDevices.length > 0
+            ? acceleratorDevices
+            : [fallbackRamDevice(nodeId, nodeName, memory)].filter(
+                (device): device is MachineMemoryDevice => device !== null,
+              );
+        const totalBytes = devices.reduce((sum, d) => sum + d.totalBytes, 0);
+        const availableBytes = devices.reduce(
+          (sum, d) => sum + d.availableBytes,
+          0,
+        );
+        const usedBytes = devices.reduce((sum, d) => sum + d.usedBytes, 0);
+        return {
+          nodeId,
+          nodeName,
+          devices: devices.sort((a, b) => {
+            if (a.kind !== b.kind) return a.kind.localeCompare(b.kind);
+            return (a.index ?? 0) - (b.index ?? 0);
+          }),
+          totalBytes,
+          availableBytes,
+          usedBytes,
+          usedPercent:
+            totalBytes > 0
+              ? Math.min(100, Math.max(0, (usedBytes / totalBytes) * 100))
+              : 0,
+        };
+      })
+      .filter((group) => group.totalBytes > 0)
+      .sort((a, b) => a.nodeName.localeCompare(b.nodeName));
+  }
+
+  function summarizeMachineMemory(
+    groups: MachineMemoryGroup[],
+  ): MachineMemorySummary[] {
+    const summaries = new Map<MachineMemoryDevice["kind"], MachineMemorySummary>();
+    for (const group of groups) {
+      for (const device of group.devices) {
+        const current = summaries.get(device.kind) ?? {
+          kind: device.kind,
+          totalBytes: 0,
+          availableBytes: 0,
+          usedBytes: 0,
+          usedPercent: 0,
+        };
+        current.totalBytes += device.totalBytes;
+        current.availableBytes += device.availableBytes;
+        current.usedBytes += device.usedBytes;
+        summaries.set(device.kind, current);
+      }
+    }
+
+    return Array.from(summaries.values()).map((summary) => ({
+      ...summary,
+      usedPercent:
+        summary.totalBytes > 0
+          ? Math.min(100, Math.max(0, (summary.usedBytes / summary.totalBytes) * 100))
+          : 0,
+    }));
+  }
+
+  const machineMemoryGroups = $derived.by(() =>
+    buildMachineMemoryGroups(memoryData),
+  );
+  const machineMemorySummaries = $derived.by(() =>
+    summarizeMachineMemory(machineMemoryGroups),
+  );
 
   // Copy to clipboard state and function
   let copiedCommand = $state(false);
@@ -3812,6 +4005,110 @@
   {/if}
 {/snippet}
 
+{#snippet machineMemoryPanel()}
+  {#if machineMemoryGroups.length > 0}
+    <div class="p-4 border-t border-exo-yellow/10 flex-shrink-0">
+      <div class="flex items-center gap-2 mb-3">
+        <div class="w-2 h-2 border border-exo-yellow/60 rotate-45"></div>
+        <h3 class="text-xs text-exo-yellow font-mono tracking-[0.2em] uppercase">
+          Machines
+        </h3>
+        <div
+          class="flex-1 h-px bg-gradient-to-r from-exo-yellow/30 to-transparent"
+        ></div>
+        <span class="text-xs text-white/70 font-mono tabular-nums"
+          >{machineMemoryGroups.length}</span
+        >
+      </div>
+
+      <div class="space-y-2 mb-3">
+        {#each machineMemorySummaries as summary}
+          <div class="border border-exo-medium-gray/40 bg-exo-black/30 p-2">
+            <div class="flex items-center justify-between text-[11px] font-mono">
+              <span class="text-white/70">{memoryKindLabel(summary.kind)}</span>
+              <span class="text-exo-yellow tabular-nums"
+                >{formatBytes(summary.availableBytes, 1)} free</span
+              >
+            </div>
+            <div class="mt-1 flex items-center justify-between text-[11px] font-mono text-exo-light-gray">
+              <span>{formatBytes(summary.usedBytes, 1)} used</span>
+              <span>{summary.usedPercent.toFixed(0)}%</span>
+            </div>
+            <div class="relative h-1.5 bg-exo-black/70 overflow-hidden mt-1.5">
+              <div
+                class="absolute inset-y-0 left-0 bg-gradient-to-r {memoryBarColor(
+                  summary.kind,
+                )} transition-all duration-300"
+                style="width: {summary.usedPercent.toFixed(1)}%"
+              ></div>
+            </div>
+            <div class="mt-1 text-[10px] font-mono text-white/40">
+              total {formatBytes(summary.totalBytes, 1)}
+            </div>
+          </div>
+        {/each}
+      </div>
+
+      <div class="space-y-2 max-h-64 overflow-y-auto pr-1">
+        {#each machineMemoryGroups as machine}
+          <div class="border border-exo-yellow/15 bg-exo-dark-gray/60 p-2">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs text-white/80 font-mono truncate"
+                >{machine.nodeName}</span
+              >
+              <span class="text-[11px] text-exo-yellow font-mono tabular-nums"
+                >{machine.usedPercent.toFixed(0)}%</span
+              >
+            </div>
+            <div class="mt-1 text-[10px] text-white/45 font-mono truncate">
+              {machine.nodeId.slice(0, 12)}
+            </div>
+            <div class="mt-2 space-y-2">
+              {#each machine.devices as device}
+                <div>
+                  <div
+                    class="flex items-center justify-between gap-2 text-[11px] font-mono"
+                  >
+                    <span class="text-white/65 truncate">
+                      {#if device.kind === "cuda_vram" && device.index !== null}
+                        GPU {device.index} · {device.name}
+                      {:else}
+                        {device.name}
+                      {/if}
+                    </span>
+                    <span class="text-white/55 flex-shrink-0 tabular-nums"
+                      >{formatBytes(device.availableBytes, 1)} free</span
+                    >
+                  </div>
+                  <div
+                    class="mt-1 flex items-center justify-between text-[10px] font-mono text-exo-light-gray"
+                  >
+                    <span>{memoryKindLabel(device.kind)}</span>
+                    <span
+                      >{formatBytes(device.usedBytes, 1)} / {formatBytes(
+                        device.totalBytes,
+                        1,
+                      )}</span
+                    >
+                  </div>
+                  <div class="relative h-1.5 bg-exo-black/70 overflow-hidden mt-1">
+                    <div
+                      class="absolute inset-y-0 left-0 bg-gradient-to-r {memoryBarColor(
+                        device.kind,
+                      )} transition-all duration-300"
+                      style="width: {device.usedPercent.toFixed(1)}%"
+                    ></div>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
+{/snippet}
+
 <!-- Global event listeners for slider dragging + onboarding keyboard nav -->
 <svelte:window
   onmousemove={handleSliderMouseMove}
@@ -5600,6 +5897,8 @@
             </div>
           {/if}
 
+          {@render machineMemoryPanel()}
+
           <!-- Models Panel - Scrollable -->
           <div class="p-4 flex-1 overflow-y-auto">
             <!-- Panel Header -->
@@ -6747,6 +7046,8 @@
                 </div>
               </div>
             {/if}
+
+            {@render machineMemoryPanel()}
           </aside>
         {/if}
       </div>

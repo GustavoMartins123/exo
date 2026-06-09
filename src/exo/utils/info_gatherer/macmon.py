@@ -2,7 +2,11 @@ from typing import Self
 
 from pydantic import BaseModel
 
-from exo.shared.types.profiling import MemoryUsage, SystemPerformanceProfile
+from exo.shared.types.profiling import (
+    MemoryDeviceUsage,
+    MemoryUsage,
+    SystemPerformanceProfile,
+)
 from exo.utils.pydantic_ext import TaggedModel
 
 
@@ -62,6 +66,14 @@ class MacmonMetrics(TaggedModel):
                 ram_available=(raw.memory.ram_total - raw.memory.ram_usage),
                 swap_total=raw.memory.swap_total,
                 swap_available=(raw.memory.swap_total - raw.memory.swap_usage),
+                accelerators=(
+                    MemoryDeviceUsage.from_bytes(
+                        name="Apple Unified Memory",
+                        kind="apple_unified",
+                        total=raw.memory.ram_total,
+                        available=raw.memory.ram_total - raw.memory.ram_usage,
+                    ),
+                ),
             ),
         )
 

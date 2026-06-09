@@ -89,11 +89,22 @@ interface RawNodeIdentity {
   osBuildVersion?: string;
 }
 
-interface RawMemoryUsage {
+export interface RawMemoryDeviceUsage {
+  name?: string;
+  kind?: "cuda_vram" | "apple_unified" | "system_ram";
+  total?: { inBytes: number };
+  available?: { inBytes: number };
+  used?: { inBytes: number };
+  usedPercent?: number;
+  index?: number | null;
+}
+
+export interface RawMemoryUsage {
   ramTotal?: { inBytes: number };
   ramAvailable?: { inBytes: number };
   swapTotal?: { inBytes: number };
   swapAvailable?: { inBytes: number };
+  accelerators?: RawMemoryDeviceUsage[];
 }
 
 interface RawSystemPerformanceProfile {
@@ -563,6 +574,7 @@ class AppStore {
   previewNodeFilter = $state<Set<string>>(new Set());
   lastUpdate = $state<number | null>(null);
   nodeIdentities = $state<Record<string, RawNodeIdentity>>({});
+  nodeMemory = $state<Record<string, RawMemoryUsage>>({});
   thunderboltBridgeCycles = $state<string[][]>([]);
   nodeThunderbolt = $state<
     Record<
@@ -1343,6 +1355,7 @@ class AppStore {
       }
       // Node identities (for OS version mismatch detection)
       this.nodeIdentities = data.nodeIdentities ?? {};
+      this.nodeMemory = data.nodeMemory ?? {};
       // Thunderbolt identifiers per node
       this.nodeThunderbolt = data.nodeThunderbolt ?? {};
       // RDMA ctl status per node
@@ -3608,6 +3621,7 @@ export const isConnected = () => appStore.isConnected;
 
 // Node identities (for OS version mismatch detection)
 export const nodeIdentities = () => appStore.nodeIdentities;
+export const nodeMemory = () => appStore.nodeMemory;
 
 // Thunderbolt & RDMA status
 export const nodeThunderbolt = () => appStore.nodeThunderbolt;
