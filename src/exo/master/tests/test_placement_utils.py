@@ -11,6 +11,7 @@ from exo.master.placement_utils import (
 )
 from exo.master.tests.conftest import (
     create_node_accelerator_memory,
+    create_node_accelerator_memory_bytes,
     create_node_memory,
     create_socket_connection,
 )
@@ -354,17 +355,24 @@ def test_pipeline_shards_use_accelerator_memory_before_system_ram():
 
 
 def test_large_pipeline_shards_reserve_memory_before_assigning_layers():
+    """Real-world cluster: 2x RTX 3060 (12 GB), 1x A5000 (24 GB), 1x Mac (96 GB).
+
+    Mirrors the observed bug: a ~15 GB model (Qwen ~27B 4-bit) loaded across the
+    full cluster used to place ~3 GB worth of layers on each 3060, which then
+    OOMed during warmup once KV cache and activation buffers materialised. The
+    placement must reserve enough headroom so each 3060 stays well below its 12
+    GB ceiling at runtime."""
     node_3060_a = NodeId()
     node_3060_b = NodeId()
     node_a5000 = NodeId()
     node_mac = NodeId()
     cycle = Cycle(node_ids=[node_3060_a, node_3060_b, node_a5000, node_mac])
     node_memory = {
-        node_3060_a: create_node_accelerator_memory(int(8.65 * 1024)),
-        node_3060_b: create_node_accelerator_memory(int(8.85 * 1024)),
-        node_a5000: create_node_accelerator_memory(int(19.38 * 1024)),
-        node_mac: create_node_accelerator_memory(
-            int(74.19 * 1024), kind="apple_unified"
+        node_3060_a: create_node_accelerator_memory_bytes(Memory.from_gb(12)),
+        node_3060_b: create_node_accelerator_memory_bytes(Memory.from_gb(12)),
+        node_a5000: create_node_accelerator_memory_bytes(Memory.from_gb(24)),
+        node_mac: create_node_accelerator_memory_bytes(
+            Memory.from_gb(96), kind="apple_unified"
         ),
     }
     model_card = ModelCard(
@@ -386,10 +394,20 @@ def test_large_pipeline_shards_reserve_memory_before_assigning_layers():
         shard = assignments.runner_to_shard[runner_id]
         layers_by_node[node_id] = shard.end_layer - shard.start_layer
 
-    assert layers_by_node[node_3060_a] <= 2
-    assert layers_by_node[node_3060_b] <= 2
+    # Each 3060 must stay small enough that one layer's weight + the static
+    # reserve fits in its 12 GB VRAM ceiling. With the default 45% ratio that
+    # caps each 3060 at roughly a quarter of the proportional share.
+    layer_weight_gb = model_card.storage_size.in_gb / model_card.n_layers
+    for node_id, name in [(node_3060_a, "3060_a"), (node_3060_b, "3060_b")]:
+        weights_on_node_gb = layers_by_node[node_id] * layer_weight_gb
+        assert weights_on_node_gb <= 1.5, (
+            f"{name} got {weights_on_node_gb:.2f} GB of weights — placement "
+            "left no warmup headroom on a 12 GB card"
+        )
+
     assert layers_by_node[node_a5000] > layers_by_node[node_3060_a]
     assert layers_by_node[node_mac] > layers_by_node[node_a5000]
+    assert sum(layers_by_node.values()) == model_card.n_layers
 
 
 def test_get_mlx_jaccl_coordinators():

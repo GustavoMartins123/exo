@@ -60,9 +60,20 @@ def _pipeline_layer_memory_budget(
     node_memory: Mapping[NodeId, MemoryUsage],
     model_card: ModelCard,
 ) -> Memory:
+    """Memory used as the *proportional allocation hint* for a node.
+
+    The static reserve nudges layers off small GPUs toward big ones, but it
+    must not zero out a node's budget — `allocate_layers_proportionally` floors
+    every node at one layer, and a 0-byte budget would later trip the
+    downstream validator, fail the whole placement and leave the master in a
+    retry loop (the regression we are fixing). Always keep at least one
+    layer's worth, capped by what the node actually has."""
     available = node_memory[node_id].inference_available
     reserve = _pipeline_static_reserve(model_card)
-    return Memory.from_bytes(max(0, available.in_bytes - reserve.in_bytes))
+    after_reserve = Memory.from_bytes(max(0, available.in_bytes - reserve.in_bytes))
+    one_layer = model_card.storage_size // model_card.n_layers
+    floor = min(available, one_layer)
+    return max(after_reserve, floor)
 
 
 def get_smallest_cycles(
@@ -175,15 +186,17 @@ def _allocate_and_validate_layers(
     for i, node_id in enumerate(node_ids):
         node_layers = layer_allocations[i]
         required_memory = (total_storage * node_layers) // total_layers
-        available_memory = _pipeline_layer_memory_budget(
-            node_id, node_memory, model_card
-        )
+        # Validate against actual available memory, not the placement budget.
+        # The static reserve is a heuristic to push layers off small GPUs; if
+        # we gated validation on it too, any node whose free VRAM happens to
+        # drop below the reserve would crash placement entirely — even when
+        # the layer would have fit fine in real memory.
+        available_memory = node_memory[node_id].inference_available
         if required_memory > available_memory:
             raise ValueError(
                 f"Node {i} ({node_id}) has insufficient memory: "
                 f"requires {required_memory.in_gb:.2f} GB for {node_layers} layers, "
-                f"but only has {available_memory.in_gb:.2f} GB available "
-                "after pipeline reserve"
+                f"but only has {available_memory.in_gb:.2f} GB available"
             )
 
     return layer_allocations
