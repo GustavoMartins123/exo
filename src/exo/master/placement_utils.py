@@ -1,3 +1,4 @@
+import os
 from collections.abc import Generator, Mapping
 
 from loguru import logger
@@ -15,6 +16,16 @@ from exo.shared.types.worker.shards import (
     Sharding,
     ShardMetadata,
     TensorShardMetadata,
+)
+
+_PIPELINE_RESERVE_MIN_MODEL_SIZE = Memory.from_gb(
+    float(os.environ.get("EXO_PIPELINE_RESERVE_MIN_MODEL_GB", "2"))
+)
+_PIPELINE_MIN_STATIC_RESERVE = Memory.from_gb(
+    float(os.environ.get("EXO_PIPELINE_MIN_STATIC_RESERVE_GB", "2"))
+)
+_PIPELINE_STATIC_RESERVE_RATIO = float(
+    os.environ.get("EXO_PIPELINE_STATIC_RESERVE_RATIO", "0.45")
 )
 
 
@@ -35,6 +46,23 @@ def filter_cycles_by_memory(
         if total_mem >= required_memory:
             filtered_cycles.append(cycle)
     return filtered_cycles
+
+
+def _pipeline_static_reserve(model_card: ModelCard) -> Memory:
+    if model_card.storage_size < _PIPELINE_RESERVE_MIN_MODEL_SIZE:
+        return Memory()
+    model_scaled_reserve = model_card.storage_size * _PIPELINE_STATIC_RESERVE_RATIO
+    return max(model_scaled_reserve, _PIPELINE_MIN_STATIC_RESERVE)
+
+
+def _pipeline_layer_memory_budget(
+    node_id: NodeId,
+    node_memory: Mapping[NodeId, MemoryUsage],
+    model_card: ModelCard,
+) -> Memory:
+    available = node_memory[node_id].inference_available
+    reserve = _pipeline_static_reserve(model_card)
+    return Memory.from_bytes(max(0, available.in_bytes - reserve.in_bytes))
 
 
 def get_smallest_cycles(
@@ -83,9 +111,13 @@ def _validate_cycle(cycle: Cycle) -> None:
 def _compute_total_memory(
     node_ids: list[NodeId],
     node_memory: Mapping[NodeId, MemoryUsage],
+    model_card: ModelCard,
 ) -> Memory:
     total_memory = sum(
-        (node_memory[node_id].inference_available for node_id in node_ids),
+        (
+            _pipeline_layer_memory_budget(node_id, node_memory, model_card)
+            for node_id in node_ids
+        ),
         start=Memory(),
     )
     if total_memory.in_bytes == 0:
@@ -132,7 +164,8 @@ def _allocate_and_validate_layers(
     layer_allocations = allocate_layers_proportionally(
         total_layers=model_card.n_layers,
         memory_fractions=[
-            node_memory[node_id].inference_available / total_memory
+            _pipeline_layer_memory_budget(node_id, node_memory, model_card)
+            / total_memory
             for node_id in node_ids
         ],
     )
@@ -142,12 +175,15 @@ def _allocate_and_validate_layers(
     for i, node_id in enumerate(node_ids):
         node_layers = layer_allocations[i]
         required_memory = (total_storage * node_layers) // total_layers
-        available_memory = node_memory[node_id].inference_available
+        available_memory = _pipeline_layer_memory_budget(
+            node_id, node_memory, model_card
+        )
         if required_memory > available_memory:
             raise ValueError(
                 f"Node {i} ({node_id}) has insufficient memory: "
                 f"requires {required_memory.in_gb:.2f} GB for {node_layers} layers, "
-                f"but only has {available_memory.in_gb:.2f} GB available"
+                f"but only has {available_memory.in_gb:.2f} GB available "
+                "after pipeline reserve"
             )
 
     return layer_allocations
@@ -188,7 +224,7 @@ def _get_shard_assignments_for_cfg_parallel(
 
     # Allocate layers for one pipeline group (both groups run the same layers)
     pipeline_node_ids = cycle.node_ids[:pipeline_world_size]
-    pipeline_memory = _compute_total_memory(pipeline_node_ids, node_memory)
+    pipeline_memory = _compute_total_memory(pipeline_node_ids, node_memory, model_card)
     layer_allocations = _allocate_and_validate_layers(
         pipeline_node_ids, node_memory, pipeline_memory, model_card
     )
@@ -238,7 +274,7 @@ def _get_shard_assignments_for_pure_pipeline(
 ) -> ShardAssignments:
     """Create shard assignments for pure pipeline execution."""
     _validate_cycle(cycle)
-    total_memory = _compute_total_memory(cycle.node_ids, node_memory)
+    total_memory = _compute_total_memory(cycle.node_ids, node_memory, model_card)
 
     layer_allocations = _allocate_and_validate_layers(
         cycle.node_ids, node_memory, total_memory, model_card

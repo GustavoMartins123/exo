@@ -353,6 +353,45 @@ def test_pipeline_shards_use_accelerator_memory_before_system_ram():
     assert layers_by_node[node_3060_b] == 4
 
 
+def test_large_pipeline_shards_reserve_memory_before_assigning_layers():
+    node_3060_a = NodeId()
+    node_3060_b = NodeId()
+    node_a5000 = NodeId()
+    node_mac = NodeId()
+    cycle = Cycle(node_ids=[node_3060_a, node_3060_b, node_a5000, node_mac])
+    node_memory = {
+        node_3060_a: create_node_accelerator_memory(int(8.65 * 1024)),
+        node_3060_b: create_node_accelerator_memory(int(8.85 * 1024)),
+        node_a5000: create_node_accelerator_memory(int(19.38 * 1024)),
+        node_mac: create_node_accelerator_memory(
+            int(74.19 * 1024), kind="apple_unified"
+        ),
+    }
+    model_card = ModelCard(
+        model_id=ModelId("test-large-model"),
+        n_layers=64,
+        storage_size=Memory.from_gb(15),
+        hidden_size=1000,
+        supports_tensor=True,
+        tasks=[ModelTask.TextGeneration],
+        backends=[Backend.MlxMetal],
+    )
+
+    assignments = get_shard_assignments(
+        model_card, cycle, Sharding.Pipeline, node_memory=node_memory
+    )
+
+    layers_by_node: dict[NodeId, int] = {}
+    for node_id, runner_id in assignments.node_to_runner.items():
+        shard = assignments.runner_to_shard[runner_id]
+        layers_by_node[node_id] = shard.end_layer - shard.start_layer
+
+    assert layers_by_node[node_3060_a] <= 2
+    assert layers_by_node[node_3060_b] <= 2
+    assert layers_by_node[node_a5000] > layers_by_node[node_3060_a]
+    assert layers_by_node[node_mac] > layers_by_node[node_a5000]
+
+
 def test_get_mlx_jaccl_coordinators():
     # arrange
     node_a_id = NodeId()

@@ -648,6 +648,17 @@ class BatchGenerator(Engine):
     def _start_task(self, task: TextGeneration) -> int:
         _check_for_debug_prompts(task.task_params)
         prompt = apply_chat_template(self.tokenizer, task.task_params)
+        shard = self.model_id
+        logger.info(
+            "runner_generation_start "
+            f"task_id={task.task_id} command_id={task.command_id} "
+            f"model={shard} rank={self.device_rank} "
+            f"active_tasks={len(self._active_tasks)} "
+            f"queued_tasks={len(self._queue)} maybe_tasks={len(self._maybe_queue)} "
+            f"stream={task.task_params.stream} "
+            f"max_output_tokens={task.task_params.max_output_tokens} "
+            f"max_context_tokens={task.task_params.max_context_tokens}"
+        )
 
         def on_prefill_progress(processed: int, total: int) -> None:
             if self.device_rank == 0:

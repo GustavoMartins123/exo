@@ -225,6 +225,16 @@ class Master:
                             )
 
                             decode_instance_id = available_instance_ids[0]
+                            decode_instance = self.state.instances[decode_instance_id]
+                            logger.info(
+                                "generation_instance_selected "
+                                f"command_id={command.command_id} "
+                                f"model={command.task_params.model} "
+                                f"instance_id={decode_instance_id} "
+                                f"in_flight={instance_task_counts[decode_instance_id]} "
+                                "nodes="
+                                f"{list(decode_instance.shard_assignments.node_to_runner.keys())}"
+                            )
                             task_id = TaskId()
                             params = command.task_params.model_copy(
                                 update={

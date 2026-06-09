@@ -14,7 +14,7 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import cast
 from urllib.parse import urlparse
 
 
@@ -33,16 +33,20 @@ def _post_stream(
     model: str,
     content: str,
     max_tokens: int,
+    user: str,
     events: queue.Queue[StreamEvent],
 ) -> None:
     started = time.perf_counter()
     parsed = urlparse(endpoint)
+    if parsed.hostname is None:
+        raise ValueError(f"Endpoint has no hostname: {endpoint}")
     path = parsed.path.rstrip("/") + "/chat/completions"
     conn = http.client.HTTPConnection(parsed.hostname, parsed.port or 80, timeout=600)
-    payload: dict[str, Any] = {
+    payload: dict[str, object] = {
         "model": model,
         "stream": True,
         "max_tokens": max_tokens,
+        "user": user,
         "messages": [{"role": "user", "content": content}],
     }
     try:
@@ -62,6 +66,7 @@ def _post_stream(
             )
         )
         first_chunk = True
+        saw_done = False
         while True:
             line = response.readline()
             if not line:
@@ -70,6 +75,7 @@ def _post_stream(
             if not text or not text.startswith("data:"):
                 continue
             if text == "data: [DONE]":
+                saw_done = True
                 events.put(
                     StreamEvent(label, "done", time.perf_counter() - started, "")
                 )
@@ -84,6 +90,10 @@ def _post_stream(
                     )
                 )
                 first_chunk = False
+        if not saw_done:
+            events.put(
+                StreamEvent(label, "closed", time.perf_counter() - started, "")
+            )
     except Exception as exc:
         events.put(
             StreamEvent(label, "error", time.perf_counter() - started, repr(exc))
@@ -98,6 +108,9 @@ def main() -> int:
     parser.add_argument("--model", required=True)
     parser.add_argument("--delay", type=float, default=1.0)
     args = parser.parse_args()
+    endpoint = cast(str, args.endpoint)
+    model = cast(str, args.model)
+    delay = cast(float, args.delay)
 
     events: queue.Queue[StreamEvent] = queue.Queue()
     long_prompt = "Conte uma historia tecnica detalhada sobre sistemas distribuidos. " * 300
@@ -107,10 +120,11 @@ def main() -> int:
         target=_post_stream,
         kwargs={
             "label": "A",
-            "endpoint": args.endpoint,
-            "model": args.model,
+            "endpoint": endpoint,
+            "model": model,
             "content": long_prompt,
             "max_tokens": 256,
+            "user": "concurrency-user-a",
             "events": events,
         },
     )
@@ -118,17 +132,18 @@ def main() -> int:
         target=_post_stream,
         kwargs={
             "label": "B",
-            "endpoint": args.endpoint,
-            "model": args.model,
+            "endpoint": endpoint,
+            "model": model,
             "content": short_prompt,
             "max_tokens": 32,
+            "user": "concurrency-user-b",
             "events": events,
         },
     )
 
     global_start = time.perf_counter()
     thread_a.start()
-    time.sleep(args.delay)
+    time.sleep(delay)
     thread_b.start()
 
     first_b: float | None = None

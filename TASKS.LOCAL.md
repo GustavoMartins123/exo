@@ -112,6 +112,27 @@ Hoje o comportamento ruim observado e:
     - teste garante que uma segunda geracao recebida enquanto o runner esta
       `RunnerRunning` e reconhecida antes do primeiro chunk da primeira request.
 
+- [x] Aprofundar diagnostico de distribuicao durante request.
+  - Feito:
+    - master loga `generation_instance_selected` com command, modelo, instancia,
+      in-flight e nodes escolhidos;
+    - runner loga `runner_generation_start` em cada rank que recebeu a task;
+    - script `scripts/test_two_user_concurrency.py` agora envia `user` diferente
+      para A/B e informa `closed` quando o stream fecha sem `[DONE]`.
+
+- [x] Reservar memoria dinamica antes de distribuir camadas em pipeline.
+  - Feito:
+    - para modelos grandes, placement desconta uma reserva por node antes de
+      calcular camadas;
+    - defaults configuraveis:
+      `EXO_PIPELINE_RESERVE_MIN_MODEL_GB=2`,
+      `EXO_PIPELINE_MIN_STATIC_RESERVE_GB=2`,
+      `EXO_PIPELINE_STATIC_RESERVE_RATIO=0.45`;
+    - o caso observado de Qwen 27B 4-bit passa a limitar 3060 com pouca VRAM
+      livre a uma fracao minima de camadas, deixando o grosso no Mac/A5000;
+    - teste cobre memoria parecida com o cluster real: 8.65GB, 8.85GB, 19.38GB
+      e 74.19GB disponiveis.
+
 ## Prioridade 0 - Reproduzir e medir antes de alterar
 
 - [ ] Criar um teste manual fixo com o payload pequeno do front.
