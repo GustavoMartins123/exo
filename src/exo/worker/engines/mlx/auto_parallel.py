@@ -253,19 +253,35 @@ def _patch_hybrid_cache(
     # Hacks to make make_mask happy.
     original = model.make_cache
 
+    def _make_mask_compat(
+        make_mask: Callable[..., mx.array | Literal["causal"] | None],
+        n: int,
+        kwargs: dict[str, object],
+    ) -> mx.array | Literal["causal"] | None:
+        try:
+            return make_mask(n, **kwargs)
+        except TypeError as exc:
+            if "unexpected keyword argument" not in str(exc):
+                raise
+            return make_mask(n)
+
     def patched() -> list[ArraysCache | KVCache]:
         cache = original()
         if not has_full_attn:
             entry = cache[fa_idx]
             orig_make_mask = entry.make_mask
-            entry.make_mask = lambda n, **_kw: orig_make_mask(n)  # type: ignore
+            entry.make_mask = lambda n, **kw: _make_mask_compat(  # type: ignore
+                orig_make_mask,
+                n,
+                kw,
+            )
         if not has_linear:
             orig_ssm_make_mask = cache[ssm_idx].make_mask
 
             def _ssm_mask(
-                n: int, **kw: bool | int | None
+                n: int, **kw: object
             ) -> mx.array | Literal["causal"] | None:
-                return orig_ssm_make_mask(n, **kw) if kw else None
+                return _make_mask_compat(orig_ssm_make_mask, n, kw) if kw else None
 
             cache[ssm_idx].make_mask = _ssm_mask  # type: ignore
         return cache
