@@ -91,6 +91,27 @@ Hoje o comportamento ruim observado e:
     - teste cobre cluster 12GB/12GB/24GB/96GB e garante mais camadas na A5000 e
       Mac, menos nas 3060.
 
+- [x] Ajustar pipeline para nao colocar ranks de ponta em GPUs pequenas quando
+  houver alternativa no ciclo.
+  - Feito:
+    - ciclos de pipeline agora podem ser rotacionados/revertidos preservando a
+      adjacencia do ring;
+    - a orientacao escolhida privilegia maior memoria de inferencia nos ranks 0
+      e final, que tendem a carregar mais memoria dinamica;
+    - placement loga `placement_pipeline` com rank, node, range de camadas e
+      memoria disponivel por maquina;
+    - teste cobre o caso 12GB/12GB/24GB/96GB e espera Mac + A5000 nas pontas
+      quando eles sao adjacentes no ciclo.
+
+- [x] Drenar fila do runner antes do passo de geracao.
+  - Feito:
+    - o runner agora puxa todas as tarefas pendentes antes e depois de cada
+      `generator.step()`;
+    - novas requests deixam de esperar obrigatoriamente um passo longo do
+      gerador anterior para serem submetidas ao batch;
+    - teste garante que uma segunda geracao recebida enquanto o runner esta
+      `RunnerRunning` e reconhecida antes do primeiro chunk da primeira request.
+
 ## Prioridade 0 - Reproduzir e medir antes de alterar
 
 - [ ] Criar um teste manual fixo com o payload pequeno do front.

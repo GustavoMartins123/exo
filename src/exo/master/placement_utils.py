@@ -29,10 +29,7 @@ def filter_cycles_by_memory(
             continue
 
         total_mem = sum(
-            (
-                node_memory[node_id].inference_available
-                for node_id in cycle.node_ids
-            ),
+            (node_memory[node_id].inference_available for node_id in cycle.node_ids),
             start=Memory(),
         )
         if total_mem >= required_memory:
@@ -94,6 +91,36 @@ def _compute_total_memory(
     if total_memory.in_bytes == 0:
         raise ValueError("Cannot create shard assignments: total available memory is 0")
     return total_memory
+
+
+def _cycle_orientations(cycle: Cycle) -> Generator[Cycle, None, None]:
+    node_ids = cycle.node_ids
+    for ids in (node_ids, list(reversed(node_ids))):
+        for offset in range(len(ids)):
+            yield Cycle(node_ids=ids[offset:] + ids[:offset])
+
+
+def orient_cycle_for_pipeline_memory(
+    cycle: Cycle,
+    node_memory: Mapping[NodeId, MemoryUsage],
+) -> Cycle:
+    """Rotate/reverse a cycle so pipeline endpoint ranks land on larger devices.
+
+    Pipeline rank 0 and the last rank tend to carry extra dynamic memory pressure
+    from embeddings, output projection, prefill buffers, and KV/cache plumbing. A
+    cycle can be rotated or reversed without changing its ring adjacency, so use
+    that freedom to avoid putting both endpoint ranks on small GPUs.
+    """
+    _validate_cycle(cycle)
+    if len(cycle) <= 2:
+        return cycle
+
+    def score(candidate: Cycle) -> tuple[int, int, int]:
+        first = node_memory[candidate.node_ids[0]].inference_available.in_bytes
+        last = node_memory[candidate.node_ids[-1]].inference_available.in_bytes
+        return (first + last, min(first, last), first)
+
+    return max(_cycle_orientations(cycle), key=score)
 
 
 def _allocate_and_validate_layers(

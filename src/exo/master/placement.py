@@ -2,6 +2,8 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Sequence
 
+from loguru import logger
+
 from exo.master.placement_utils import (
     Cycle,
     filter_cycles_by_memory,
@@ -10,6 +12,7 @@ from exo.master.placement_utils import (
     get_mlx_ring_hosts_by_node,
     get_shard_assignments,
     get_smallest_cycles,
+    orient_cycle_for_pipeline_memory,
 )
 from exo.shared.models.model_cards import ModelId
 from exo.shared.topology import Topology
@@ -45,6 +48,7 @@ from exo.shared.types.worker.instances import (
     MlxJacclInstance,
     MlxRingInstance,
 )
+from exo.shared.types.worker.runners import ShardAssignments
 from exo.shared.types.worker.shards import Sharding
 from exo.utils.ports import random_ephemeral_port
 
@@ -100,6 +104,45 @@ def _cycle_download_score(
     return sum(
         _get_node_download_fraction(node_id, model_id, download_status)
         for node_id in cycle
+    )
+
+
+def _log_pipeline_placement(
+    command: PlaceInstance,
+    selected_cycle: Cycle,
+    node_memory: Mapping[NodeId, MemoryUsage],
+    shard_assignments: ShardAssignments,
+) -> None:
+    parts: list[str] = []
+    for node_id in selected_cycle.node_ids:
+        runner_id = shard_assignments.node_to_runner[node_id]
+        shard = shard_assignments.runner_to_shard[runner_id]
+        start_layer = getattr(shard, "start_layer", None)
+        end_layer = getattr(shard, "end_layer", None)
+        layer_count = (
+            end_layer - start_layer
+            if isinstance(start_layer, int) and isinstance(end_layer, int)
+            else "n/a"
+        )
+        memory = node_memory[node_id].inference_available
+        parts.append(
+            "rank={rank} node={node} layers={layers} range={start}:{end} "
+            "inference_available={memory:.2f}GB".format(
+                rank=getattr(shard, "device_rank", "n/a"),
+                node=node_id,
+                layers=layer_count,
+                start=start_layer,
+                end=end_layer,
+                memory=memory.in_gb,
+            )
+        )
+
+    logger.info(
+        "placement_pipeline model={} sharding={} meta={} cycle=[{}]",
+        command.model_card.model_id,
+        command.sharding.value,
+        command.instance_meta.value,
+        "; ".join(parts),
     )
 
 
@@ -251,9 +294,19 @@ def place_instance(
             }
         )
 
+    if command.sharding == Sharding.Pipeline:
+        selected_cycle = orient_cycle_for_pipeline_memory(selected_cycle, node_memory)
+
     shard_assignments = get_shard_assignments(
         command.model_card, selected_cycle, command.sharding, node_memory
     )
+    if command.sharding == Sharding.Pipeline:
+        _log_pipeline_placement(
+            command=command,
+            selected_cycle=selected_cycle,
+            node_memory=node_memory,
+            shard_assignments=shard_assignments,
+        )
 
     cycle_digraph: Topology = topology.get_subgraph_from_nodes(selected_cycle.node_ids)
 

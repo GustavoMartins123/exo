@@ -7,6 +7,7 @@ from exo.master.placement_utils import (
     get_shard_assignments,
     get_shard_assignments_for_pipeline_parallel,
     get_smallest_cycles,
+    orient_cycle_for_pipeline_memory,
 )
 from exo.master.tests.conftest import (
     create_node_accelerator_memory,
@@ -22,7 +23,7 @@ from exo.shared.types.profiling import (
     NetworkInterfaceInfo,
     NodeNetworkInfo,
 )
-from exo.shared.types.topology import Connection, SocketConnection
+from exo.shared.types.topology import Connection, Cycle, SocketConnection
 from exo.shared.types.worker.shards import (
     CfgShardMetadata,
     PipelineShardMetadata,
@@ -185,6 +186,25 @@ def test_get_smallest_cycles():
     assert set(n for n in smallest_cycles[0]) == {node_a_id, node_b_id}
 
 
+def test_orient_cycle_for_pipeline_memory_prefers_large_endpoint_ranks():
+    node_3060_a = NodeId("3060-a")
+    node_3060_b = NodeId("3060-b")
+    node_a5000 = NodeId("a5000")
+    node_mac = NodeId("mac")
+    cycle = Cycle(node_ids=[node_3060_a, node_mac, node_a5000, node_3060_b])
+    node_memory = {
+        node_3060_a: create_node_accelerator_memory(12 * 1024),
+        node_3060_b: create_node_accelerator_memory(12 * 1024),
+        node_a5000: create_node_accelerator_memory(24 * 1024),
+        node_mac: create_node_accelerator_memory(96 * 1024, kind="apple_unified"),
+    }
+
+    oriented = orient_cycle_for_pipeline_memory(cycle, node_memory)
+
+    assert oriented.node_ids[0] == node_mac
+    assert oriented.node_ids[-1] == node_a5000
+
+
 @pytest.mark.parametrize(
     "available_memory,total_layers,expected_layers",
     [
@@ -304,9 +324,7 @@ def test_pipeline_shards_use_accelerator_memory_before_system_ram():
         node_3060_a: create_node_accelerator_memory(12 * 1024),
         node_3060_b: create_node_accelerator_memory(12 * 1024),
         node_a5000: create_node_accelerator_memory(24 * 1024),
-        node_mac: create_node_accelerator_memory(
-            96 * 1024, kind="apple_unified"
-        ),
+        node_mac: create_node_accelerator_memory(96 * 1024, kind="apple_unified"),
     }
 
     model_card = ModelCard(

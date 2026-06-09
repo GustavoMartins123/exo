@@ -342,6 +342,38 @@ class Runner:
         self.active_tasks[task.task_id] = task
         self.generator.submit(task)
 
+    def _handle_generation_work_item(self, item: WorkItem) -> ExitCode | None:
+        if isinstance(item, _TaskStreamClosed):
+            return ExitCode.Shutdown
+        if isinstance(item, PrefillTask):
+            self._serve_prefill(item)
+            return None
+        if item.task_id in self.seen:
+            logger.warning("repeat task - potential error")
+            return None
+        self.seen.add(item.task_id)
+        match item:
+            case TextGeneration() | ImageGeneration() | ImageEdits():
+                self.acknowledge_task(item)
+                self.submit_generation(item)
+            case Shutdown():
+                self.shutdown(item)
+                return ExitCode.Shutdown
+            case _:
+                raise ValueError(
+                    f"Received {item.__class__.__name__} outside of state machine in {self.current_status=}"
+                )
+        return None
+
+    def _drain_generation_work_queue(self) -> ExitCode | None:
+        while True:
+            try:
+                item = self._work_queue.get_nowait()
+            except queue.Empty:
+                return None
+            if return_code := self._handle_generation_work_item(item):
+                return return_code
+
     def handle_generation_tasks(self, starting_task: GenerationTask):
         assert isinstance(self.current_status, RunnerReady)
         assert isinstance(self.generator, Engine)
@@ -354,7 +386,13 @@ class Runner:
 
         self.submit_generation(starting_task)
 
+        if return_code := self._drain_generation_work_queue():
+            return return_code
+
         while self.active_tasks:
+            if return_code := self._drain_generation_work_queue():
+                return return_code
+
             results = self.generator.step()
 
             finished: list[TaskId] = []
@@ -375,30 +413,8 @@ class Runner:
             for task_id in finished:
                 self.active_tasks.pop(task_id, None)
 
-            try:
-                item = self._work_queue.get_nowait()
-            except queue.Empty:
-                continue
-            if isinstance(item, _TaskStreamClosed):
-                return ExitCode.Shutdown
-            if isinstance(item, PrefillTask):
-                self._serve_prefill(item)
-                continue
-            if item.task_id in self.seen:
-                logger.warning("repeat task - potential error")
-                continue
-            self.seen.add(item.task_id)
-            match item:
-                case TextGeneration() | ImageGeneration() | ImageEdits():
-                    self.acknowledge_task(item)
-                    self.submit_generation(item)
-                case Shutdown():
-                    self.shutdown(item)
-                    return ExitCode.Shutdown
-                case _:
-                    raise ValueError(
-                        f"Received {item.__class__.__name__} outside of state machine in {self.current_status=}"
-                    )
+            if return_code := self._drain_generation_work_queue():
+                return return_code
 
         self.update_status(RunnerReady(prefill_server_port=self._prefill_server_port))
         logger.info("runner ready")

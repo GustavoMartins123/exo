@@ -9,6 +9,7 @@ import exo.worker.engines.mlx.builder as mlx_builder
 import exo.worker.runner.llm_inference.batch_generator as mlx_batch_generator
 import exo.worker.runner.llm_inference.model_output_parsers as mlx_model_output_parsers
 from exo.shared.types.chunks import TokenChunk
+from exo.shared.types.common import CommandId
 from exo.shared.types.events import (
     ChunkGenerated,
     Event,
@@ -243,7 +244,11 @@ class MockGroup:
         return 1
 
 
-def _run(tasks: Iterable[Task], send_after_ready: list[Task] | None = None):
+def _run(
+    tasks: Iterable[Task],
+    send_after_ready: list[Task] | None = None,
+    send_after_running: list[Task] | None = None,
+):
     bound_instance = get_bound_mlx_ring_instance(
         instance_id=INSTANCE_1_ID,
         model_id=MODEL_A_ID,
@@ -255,17 +260,23 @@ def _run(tasks: Iterable[Task], send_after_ready: list[Task] | None = None):
     _cancel_sender, cancel_receiver = mp_channel[TaskId]()
 
     on_event: Callable[[Event], None] | None = None
-    if send_after_ready:
+    if send_after_ready or send_after_running:
         _saw_running = False
+        _sent_after_running = False
 
         def _on_event(event: Event) -> None:
-            nonlocal _saw_running
+            nonlocal _saw_running, _sent_after_running
             if isinstance(event, RunnerStatusUpdated):
                 if isinstance(event.runner_status, RunnerRunning):
                     _saw_running = True
+                    if send_after_running and not _sent_after_running:
+                        _sent_after_running = True
+                        for t in send_after_running:
+                            task_sender.send(t)
                 elif _saw_running and isinstance(event.runner_status, RunnerReady):
-                    for t in send_after_ready:
-                        task_sender.send(t)
+                    if send_after_ready:
+                        for t in send_after_ready:
+                            task_sender.send(t)
 
         on_event = _on_event
 
@@ -368,3 +379,28 @@ def test_events_processed_in_correct_order(patch_out_mlx: pytest.MonkeyPatch):
             RunnerStatusUpdated(runner_id=RUNNER_1_ID, runner_status=RunnerShutdown()),
         ],
     )
+
+
+def test_runner_drains_queued_generation_before_first_step(
+    patch_out_mlx: pytest.MonkeyPatch,
+):
+    second_task = CHAT_TASK.model_copy(
+        update={"task_id": TaskId(), "command_id": CommandId()}
+    )
+
+    events = _run(
+        [INIT_TASK, LOAD_TASK, WARMUP_TASK, CHAT_TASK],
+        send_after_running=[second_task],
+        send_after_ready=[SHUTDOWN_TASK],
+    )
+
+    first_chunk_index = next(
+        index for index, event in enumerate(events) if isinstance(event, ChunkGenerated)
+    )
+    second_ack_index = next(
+        index
+        for index, event in enumerate(events)
+        if isinstance(event, TaskAcknowledged) and event.task_id == second_task.task_id
+    )
+
+    assert second_ack_index < first_chunk_index
