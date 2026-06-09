@@ -91,9 +91,7 @@ def _post_stream(
                 )
                 first_chunk = False
         if not saw_done:
-            events.put(
-                StreamEvent(label, "closed", time.perf_counter() - started, "")
-            )
+            events.put(StreamEvent(label, "closed", time.perf_counter() - started, ""))
     except Exception as exc:
         events.put(
             StreamEvent(label, "error", time.perf_counter() - started, repr(exc))
@@ -113,7 +111,9 @@ def main() -> int:
     delay = cast(float, args.delay)
 
     events: queue.Queue[StreamEvent] = queue.Queue()
-    long_prompt = "Conte uma historia tecnica detalhada sobre sistemas distribuidos. " * 300
+    long_prompt = (
+        "Conte uma historia tecnica detalhada sobre sistemas distribuidos. " * 300
+    )
     short_prompt = "Responda em uma frase: duas requests estao rodando?"
 
     thread_a = threading.Thread(

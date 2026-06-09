@@ -29,7 +29,9 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
+def _json_response(
+    handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]
+) -> None:
     encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json")
@@ -114,7 +116,9 @@ class NodeAgent:
             "created_at": int(time.time()),
             "source": "node-agent",
         }
-        command_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+        command_path.write_text(
+            json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8"
+        )
         return {"queued": True, "command": payload}
 
 
@@ -127,7 +131,9 @@ def _handler(agent: NodeAgent) -> type[BaseHTTPRequestHandler]:
             if not agent.authorize(self):
                 return
             if self.path in {"/health", "/"}:
-                _json_response(self, HTTPStatus.OK, {"ok": True, "node": agent.node_name})
+                _json_response(
+                    self, HTTPStatus.OK, {"ok": True, "node": agent.node_name}
+                )
                 return
             if self.path == "/status":
                 _json_response(self, HTTPStatus.OK, agent.status())
@@ -177,7 +183,9 @@ def _heartbeat(agent: NodeAgent, controller_url: str, stop_event: Event) -> None
 def main() -> int:
     parser = argparse.ArgumentParser(description="Exo node signal agent")
     parser.add_argument("--host", default=os.environ.get("EXO_AGENT_HOST", "0.0.0.0"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("EXO_AGENT_PORT", "8765")))
+    parser.add_argument(
+        "--port", type=int, default=int(os.environ.get("EXO_AGENT_PORT", "8765"))
+    )
     parser.add_argument(
         "--shared-dir",
         default=os.environ.get("EXO_AGENT_SHARED_DIR", "/var/lib/exo-agent"),

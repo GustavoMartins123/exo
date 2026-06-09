@@ -133,26 +133,26 @@ pull_repo() {
 run_action() {
   local action="$1"
   case "$action" in
-    start)
-      start_exo
-      ;;
-    stop)
-      stop_exo
-      ;;
-    restart)
-      stop_exo
-      start_exo
-      ;;
-    status)
-      :
-      ;;
-    pull)
-      pull_repo
-      ;;
-    *)
-      echo "unsupported action: $action" >&2
-      return 1
-      ;;
+  start)
+    start_exo
+    ;;
+  stop)
+    stop_exo
+    ;;
+  restart)
+    stop_exo
+    start_exo
+    ;;
+  status)
+    :
+    ;;
+  pull)
+    pull_repo
+    ;;
+  *)
+    echo "unsupported action: $action" >&2
+    return 1
+    ;;
   esac
   write_status
 }
@@ -196,16 +196,16 @@ drain_commands() {
 main() {
   local action="${1:-drain}"
   case "$action" in
-    drain)
-      drain_commands
-      ;;
-    start|stop|restart|status|pull)
-      run_action "$action"
-      ;;
-    *)
-      echo "usage: $0 [drain|start|stop|restart|status|pull]" >&2
-      return 2
-      ;;
+  drain)
+    drain_commands
+    ;;
+  start | stop | restart | status | pull)
+    run_action "$action"
+    ;;
+  *)
+    echo "usage: $0 [drain|start|stop|restart|status|pull]" >&2
+    return 2
+    ;;
   esac
 }
 

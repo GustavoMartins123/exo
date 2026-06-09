@@ -103,10 +103,13 @@
     if (clusterStarting) return;
     clusterStarting = true;
     try {
-      const response = await fetch("/cluster/children/start", { method: "POST" });
-      const payload = (await response.json()) as ClusterChildrenStartResponse & {
-        detail?: string;
-      };
+      const response = await fetch("/cluster/children/start", {
+        method: "POST",
+      });
+      const payload =
+        (await response.json()) as ClusterChildrenStartResponse & {
+          detail?: string;
+        };
       if (!response.ok) {
         addToast({
           type: "error",

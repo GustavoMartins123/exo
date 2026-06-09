@@ -36,7 +36,10 @@ class Engine(ABC):
     def step(
         self,
     ) -> Iterable[
-        tuple[TaskId, Chunk | CancelledResponse | FinishedResponse | RecoverableErrorResponse]
+        tuple[
+            TaskId,
+            Chunk | CancelledResponse | FinishedResponse | RecoverableErrorResponse,
+        ]
     ]: ...
 
     @abstractmethod

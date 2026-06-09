@@ -20,7 +20,9 @@ from typing import Any
 COMMANDS = {"start", "stop", "restart", "status", "pull"}
 
 
-def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
+def _json_response(
+    handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]
+) -> None:
     encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json")
@@ -148,7 +150,9 @@ def _handler(controller: Controller) -> type[BaseHTTPRequestHandler]:
                 try:
                     result = controller.dispatch(node_name, parts[2])
                 except KeyError:
-                    _json_response(self, HTTPStatus.NOT_FOUND, {"error": "node not found"})
+                    _json_response(
+                        self, HTTPStatus.NOT_FOUND, {"error": "node not found"}
+                    )
                     return
                 except ValueError as exc:
                     _json_response(self, HTTPStatus.BAD_REQUEST, {"error": str(exc)})
@@ -162,8 +166,12 @@ def _handler(controller: Controller) -> type[BaseHTTPRequestHandler]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Exo cluster controller")
-    parser.add_argument("--host", default=os.environ.get("EXO_CONTROLLER_HOST", "0.0.0.0"))
-    parser.add_argument("--port", type=int, default=int(os.environ.get("EXO_CONTROLLER_PORT", "8766")))
+    parser.add_argument(
+        "--host", default=os.environ.get("EXO_CONTROLLER_HOST", "0.0.0.0")
+    )
+    parser.add_argument(
+        "--port", type=int, default=int(os.environ.get("EXO_CONTROLLER_PORT", "8766"))
+    )
     args = parser.parse_args()
 
     controller = Controller(os.environ.get("EXO_AGENT_TOKEN") or None)

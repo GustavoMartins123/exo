@@ -1,7 +1,7 @@
 import gc
 import os
 from copy import deepcopy
-from typing import TYPE_CHECKING, Callable, Literal, cast
+from typing import TYPE_CHECKING, cast
 
 import mlx.core as mx
 import numpy as np
@@ -28,6 +28,25 @@ from exo.worker.runner.bootstrap import logger
 
 if TYPE_CHECKING:
     from exo.worker.engines.mlx.vision import MediaRegion
+
+
+_ORIGINAL_ARRAYS_CACHE_MAKE_MASK = ArraysCache.make_mask
+
+
+def _arrays_cache_make_mask_compat(
+    self: ArraysCache,
+    n: int,
+    *_args: object,
+    **_kwargs: object,
+) -> mx.array | None:
+    return _ORIGINAL_ARRAYS_CACHE_MAKE_MASK(self, n)
+
+
+# MLX-LM versions can disagree internally: create_attention_mask may call
+# ArraysCache.make_mask(..., return_array=...), while ArraysCache still exposes
+# the older make_mask(n) signature. Patch the class so internally-created
+# ArraysCache instances are covered too.
+ArraysCache.make_mask = _arrays_cache_make_mask_compat  # type: ignore
 
 
 # Fraction of device memory above which LRU eviction kicks in.
@@ -392,7 +411,12 @@ class KVPrefixCache:
                 best_index, best_length = i, length
 
         if best_index is None:
-            return make_kv_cache(model, max_kv_size=max_kv_size), prompt_tokens, None, False
+            return (
+                make_kv_cache(model, max_kv_size=max_kv_size),
+                prompt_tokens,
+                None,
+                False,
+            )
 
         # For exact match: trim to max_length-1 so remaining has the last token
         # For partial match: trim to best_length, remaining has suffix to prefill
@@ -408,7 +432,12 @@ class KVPrefixCache:
 
         # No usable snapshot — need fresh cache
         if restore_snap is None and has_ssm:
-            return make_kv_cache(model, max_kv_size=max_kv_size), prompt_tokens, None, False
+            return (
+                make_kv_cache(model, max_kv_size=max_kv_size),
+                prompt_tokens,
+                None,
+                False,
+            )
 
         prompt_cache = deepcopy(self.caches[best_index])
         tokens_to_trim = cached_length - restore_pos
@@ -639,39 +668,6 @@ def get_memory_used_percentage() -> float:
     return float(mem.percent / 100)
 
 
-def _make_mask_compat(
-    make_mask: Callable[..., mx.array | Literal["causal"] | None],
-    n: int,
-    kwargs: dict[str, object],
-) -> mx.array | Literal["causal"] | None:
-    try:
-        return make_mask(n, **kwargs)
-    except TypeError as exc:
-        if "unexpected keyword argument" not in str(exc):
-            raise
-        return make_mask(n)
-
-
-def _patch_arrays_cache_make_mask(entry: ArraysCache) -> None:
-    orig_make_mask = entry.make_mask
-    entry.make_mask = lambda n, **kw: _make_mask_compat(  # type: ignore
-        orig_make_mask,
-        n,
-        kw,
-    )
-
-
-def _patch_cache_make_mask_compat(cache: KVCacheType) -> None:
-    for entry in cache:
-        if isinstance(entry, ArraysCache):
-            _patch_arrays_cache_make_mask(entry)
-            continue
-        if isinstance(entry, CacheList):
-            for inner in entry:
-                if isinstance(inner, ArraysCache):
-                    _patch_arrays_cache_make_mask(inner)
-
-
 def make_kv_cache(
     model: Model, max_kv_size: int | None = None, keep: int = 0
 ) -> KVCacheType:
@@ -680,7 +676,6 @@ def make_kv_cache(
     if hasattr(model, "make_cache"):
         logger.info("Using MLX LM's make cache")
         cache = cast(KVCacheType, model.make_cache())  # type: ignore
-        _patch_cache_make_mask_compat(cache)
         clamp_kv_cache_max_size(cache, max_kv_size)
         return cache
 

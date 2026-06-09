@@ -403,7 +403,10 @@
   function summarizeMachineMemory(
     groups: MachineMemoryGroup[],
   ): MachineMemorySummary[] {
-    const summaries = new Map<MachineMemoryDevice["kind"], MachineMemorySummary>();
+    const summaries = new Map<
+      MachineMemoryDevice["kind"],
+      MachineMemorySummary
+    >();
     for (const group of groups) {
       for (const device of group.devices) {
         const current = summaries.get(device.kind) ?? {
@@ -424,7 +427,10 @@
       ...summary,
       usedPercent:
         summary.totalBytes > 0
-          ? Math.min(100, Math.max(0, (summary.usedBytes / summary.totalBytes) * 100))
+          ? Math.min(
+              100,
+              Math.max(0, (summary.usedBytes / summary.totalBytes) * 100),
+            )
           : 0,
     }));
   }
@@ -4010,7 +4016,9 @@
     <div class="p-4 border-t border-exo-yellow/10 flex-shrink-0">
       <div class="flex items-center gap-2 mb-3">
         <div class="w-2 h-2 border border-exo-yellow/60 rotate-45"></div>
-        <h3 class="text-xs text-exo-yellow font-mono tracking-[0.2em] uppercase">
+        <h3
+          class="text-xs text-exo-yellow font-mono tracking-[0.2em] uppercase"
+        >
           Machines
         </h3>
         <div
@@ -4024,13 +4032,17 @@
       <div class="space-y-2 mb-3">
         {#each machineMemorySummaries as summary}
           <div class="border border-exo-medium-gray/40 bg-exo-black/30 p-2">
-            <div class="flex items-center justify-between text-[11px] font-mono">
+            <div
+              class="flex items-center justify-between text-[11px] font-mono"
+            >
               <span class="text-white/70">{memoryKindLabel(summary.kind)}</span>
               <span class="text-exo-yellow tabular-nums"
                 >{formatBytes(summary.availableBytes, 1)} free</span
               >
             </div>
-            <div class="mt-1 flex items-center justify-between text-[11px] font-mono text-exo-light-gray">
+            <div
+              class="mt-1 flex items-center justify-between text-[11px] font-mono text-exo-light-gray"
+            >
               <span>{formatBytes(summary.usedBytes, 1)} used</span>
               <span>{summary.usedPercent.toFixed(0)}%</span>
             </div>
@@ -4091,7 +4103,9 @@
                       )}</span
                     >
                   </div>
-                  <div class="relative h-1.5 bg-exo-black/70 overflow-hidden mt-1">
+                  <div
+                    class="relative h-1.5 bg-exo-black/70 overflow-hidden mt-1"
+                  >
                     <div
                       class="absolute inset-y-0 left-0 bg-gradient-to-r {memoryBarColor(
                         device.kind,

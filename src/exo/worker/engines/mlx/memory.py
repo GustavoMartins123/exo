@@ -389,7 +389,10 @@ def fit_mlx_context_budget_to_memory(
     if fitted_max_output_tokens < 1:
         fitted_max_output_tokens = 1
 
-    if fitted_context != requested_context or fitted_max_output_tokens != max_output_tokens:
+    if (
+        fitted_context != requested_context
+        or fitted_max_output_tokens != max_output_tokens
+    ):
         logger.warning(
             "generation_memory_budget_clamped "
             f"model={task.model} prompt_tokens={prompt_tokens} "

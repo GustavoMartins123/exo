@@ -488,7 +488,9 @@ class ExoBatchGenerator:
     def _handle_prompt_response(self, uid: int, response: object) -> None:
         state = self._active_tasks.get(uid)
         if state is None:
-            logger.warning(f"prompt response uid {uid} was not found - should be active")
+            logger.warning(
+                f"prompt response uid {uid} was not found - should be active"
+            )
             return
 
         progress = getattr(response, "progress", (0, 0))

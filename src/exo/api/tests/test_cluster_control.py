@@ -53,7 +53,9 @@ def test_candidate_hosts_scans_local_24_inside_large_network(
 ) -> None:
     _clear_cluster_env(monkeypatch)
     monkeypatch.setenv("EXO_CLUSTER_AGENT_CIDRS", "10.10.0.0/16")
-    monkeypatch.setattr(cluster_control, "_local_ipv4_addresses", lambda: ["10.10.10.1"])
+    monkeypatch.setattr(
+        cluster_control, "_local_ipv4_addresses", lambda: ["10.10.10.1"]
+    )
     monkeypatch.setenv("EXO_CLUSTER_DISCOVERY_MAX_HOSTS", "300")
 
     hosts = cluster_control._candidate_hosts(cluster_control.cluster_config())

@@ -161,7 +161,9 @@ def _configured_scan_networks(config: ClusterConfig) -> list[ipaddress.IPv4Netwo
         try:
             network = ipaddress.ip_network(raw_cidr, strict=False)
         except ValueError:
-            logger.warning(f"ignoring invalid EXO_CLUSTER_AGENT_CIDRS entry: {raw_cidr}")
+            logger.warning(
+                f"ignoring invalid EXO_CLUSTER_AGENT_CIDRS entry: {raw_cidr}"
+            )
             continue
         if network.version == 4:
             networks.append(network)
@@ -173,7 +175,9 @@ def _configured_scan_networks(config: ClusterConfig) -> list[ipaddress.IPv4Netwo
 def _candidate_hosts(config: ClusterConfig) -> list[str]:
     hosts = list(config.static_hosts)
     max_hosts = int(
-        os.environ.get("EXO_CLUSTER_DISCOVERY_MAX_HOSTS", str(DEFAULT_MAX_DISCOVERY_HOSTS))
+        os.environ.get(
+            "EXO_CLUSTER_DISCOVERY_MAX_HOSTS", str(DEFAULT_MAX_DISCOVERY_HOSTS)
+        )
     )
     for network in _configured_scan_networks(config):
         for scan_network in _bounded_scan_networks(network):
@@ -237,7 +241,9 @@ async def _get_agent_status(
         url=f"http://{advertised_host}:{advertised_port}",
         is_self=advertised_host in _local_ipv4_addresses()
         or node.lower() in _hostname_candidates(),
-        host_status=payload.get("host_status") if isinstance(payload.get("host_status"), dict) else {},
+        host_status=payload.get("host_status")
+        if isinstance(payload.get("host_status"), dict)
+        else {},
     )
 
 
@@ -246,13 +252,14 @@ async def discover_cluster_agents() -> list[ClusterAgentStatus]:
     token = os.environ.get("EXO_AGENT_TOKEN") or None
     hosts = _candidate_hosts(config)
     timeout = float(
-        os.environ.get("EXO_CLUSTER_DISCOVERY_TIMEOUT", str(DEFAULT_SCAN_TIMEOUT_SECONDS))
+        os.environ.get(
+            "EXO_CLUSTER_DISCOVERY_TIMEOUT", str(DEFAULT_SCAN_TIMEOUT_SECONDS)
+        )
     )
     limits = httpx.Limits(max_connections=128)
     async with httpx.AsyncClient(timeout=timeout, limits=limits) as client:
         tasks = [
-            _get_agent_status(client, host, config.agent_port, token)
-            for host in hosts
+            _get_agent_status(client, host, config.agent_port, token) for host in hosts
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
     agents = [
@@ -270,7 +277,9 @@ async def dispatch_cluster_action(
     token = os.environ.get("EXO_AGENT_TOKEN") or None
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     timeout = float(
-        os.environ.get("EXO_CLUSTER_COMMAND_TIMEOUT", str(DEFAULT_COMMAND_TIMEOUT_SECONDS))
+        os.environ.get(
+            "EXO_CLUSTER_COMMAND_TIMEOUT", str(DEFAULT_COMMAND_TIMEOUT_SECONDS)
+        )
     )
 
     async def send(agent: ClusterAgentStatus) -> ClusterCommandResult:

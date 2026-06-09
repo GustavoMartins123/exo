@@ -142,9 +142,9 @@ Hoje o comportamento ruim observado e:
       chamada com a assinatura antiga `make_mask(n)`;
     - isso cobre tambem shards que contem full attention e linear/SSM ao mesmo
       tempo, que antes passavam sem patch.
-    - reforco posterior: `cache.make_kv_cache` tambem aplica compatibilidade em
-      todo `ArraysCache` retornado por `model.make_cache`, inclusive dentro de
-      `CacheList`, cobrindo warmup e geracao por um ponto central.
+    - reforco final: `ArraysCache.make_mask` agora e adaptado no nivel da
+      classe para aceitar kwargs novos do MLX-LM em todos os caches, inclusive
+      quando o cache e criado internamente fora do caminho `make_kv_cache`.
 
 ## Prioridade 0 - Reproduzir e medir antes de alterar
 

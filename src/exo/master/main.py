@@ -380,7 +380,9 @@ class Master:
                                     f"No instance found for model {command.model_id}"
                                 )
                             for instance in matching_instances:
-                                for runner_id in instance.shard_assignments.runner_to_shard:
+                                for (
+                                    runner_id
+                                ) in instance.shard_assignments.runner_to_shard:
                                     task_id = TaskId()
                                     generated_events.append(
                                         TaskCreated(

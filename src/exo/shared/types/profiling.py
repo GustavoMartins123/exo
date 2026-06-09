@@ -166,7 +166,9 @@ class MemoryUsage(FrozenModel):
             swap_available=sm.free,
             accelerators=_gather_platform_memory_devices(
                 ram_total=vm.total,
-                ram_available=vm.available if override_memory is None else override_memory,
+                ram_available=vm.available
+                if override_memory is None
+                else override_memory,
             ),
         )
 

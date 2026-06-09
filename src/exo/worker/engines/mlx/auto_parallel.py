@@ -290,9 +290,7 @@ def _patch_hybrid_cache(
         if not has_linear:
             orig_ssm_make_mask = cache[ssm_idx].make_mask
 
-            def _ssm_mask(
-                n: int, **kw: object
-            ) -> mx.array | Literal["causal"] | None:
+            def _ssm_mask(n: int, **kw: object) -> mx.array | Literal["causal"] | None:
                 return _make_mask_compat(orig_ssm_make_mask, n, kw) if kw else None
 
             cache[ssm_idx].make_mask = _ssm_mask  # type: ignore
