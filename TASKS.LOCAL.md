@@ -125,6 +125,12 @@ Hoje o comportamento ruim observado e:
       - runner loga `runner_step_start`, `runner_step_done` e
         `runner_step_slow` por rank para diagnosticar BF16 preso em
         sincronizacao, JIT ou forward.
+    - correcao do travamento na quinta mensagem:
+      - prefix cache local fica desabilitado em pipeline distribuido, porque
+        ranks diferentes estavam vendo `prefix_hit_length` diferente e travando
+        o prefill;
+      - caches de prefixo antigos sao limpos uma vez quando pipeline e
+        detectado.
 
 - [x] Reservar memoria dinamica antes de distribuir camadas em pipeline.
   - Feito:

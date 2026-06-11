@@ -636,6 +636,15 @@ def mlx_generate(
     is_bench = task.bench
     if is_bench and not task.use_prefix_cache:
         kv_prefix_cache = None
+    if kv_prefix_cache is not None and _has_pipeline_communication_layer(model):
+        removed = kv_prefix_cache.clear()
+        if removed > 0:
+            mx.clear_cache()
+        logger.info(
+            "prefix_cache_disabled_pipeline "
+            f"model={task.model} removed_entries={removed}"
+        )
+        kv_prefix_cache = None
 
     # Use prefix cache if available, otherwise create fresh cache
     prefix_hit_length = 0

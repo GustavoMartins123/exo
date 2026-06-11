@@ -28,6 +28,10 @@ from exo.shared.constants import EXO_MAX_CONCURRENT_REQUESTS
 from exo.shared.types.memory import Memory
 from exo.shared.types.text_generation import TextGenerationTaskParams
 from exo.shared.types.worker.runner_response import GenerationResponse
+from exo.worker.engines.mlx.auto_parallel import (
+    PipelineFirstLayer,
+    PipelineLastLayer,
+)
 from exo.worker.engines.mlx.cache import (
     CacheSnapshot,
     KVPrefixCache,
@@ -76,6 +80,13 @@ REMOTE_PREFILL_MIN_TOKENS = 1000
 DEFAULT_BATCH_PREFILL_STEP_SIZE = 1024
 
 
+def _has_pipeline_communication_layer(model: Model) -> bool:
+    for layer in model.layers:
+        if isinstance(layer, (PipelineFirstLayer, PipelineLastLayer)):
+            return True
+    return False
+
+
 def _batch_prefill_step_size() -> int:
     raw_value = os.getenv("EXO_PREFILL_STEP_SIZE")
     if raw_value is None:
@@ -121,6 +132,7 @@ class _EngineTask:
     uncached_prompt_tokens: int = 0
     cache_snapshots: list[CacheSnapshot] = field(default_factory=list)
     prefix_cache_saved: bool = False
+    allow_prefix_cache: bool = False
 
 
 @dataclass(eq=False)
@@ -133,6 +145,7 @@ class ExoBatchGenerator:
 
     _mlx_gen: MlxBatchGenerator = field(init=False)
     _active_tasks: dict[int, _EngineTask] = field(default_factory=dict, init=False)
+    _pipeline_prefix_cache_cleared: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         prefill_step_size = _batch_prefill_step_size()
@@ -152,6 +165,27 @@ class ExoBatchGenerator:
             f"completion_batch_size={completion_batch_size}"
         )
         self._step_count = 0
+
+    def _allow_prefix_cache(
+        self, task_params: TextGenerationTaskParams, is_bench: bool
+    ) -> bool:
+        if self.kv_prefix_cache is None:
+            return False
+        if is_bench and not task_params.use_prefix_cache:
+            return False
+        if not _has_pipeline_communication_layer(self.model):
+            return True
+
+        if not self._pipeline_prefix_cache_cleared:
+            removed = self.kv_prefix_cache.clear()
+            if removed > 0:
+                mx.clear_cache()
+            logger.info(
+                "prefix_cache_disabled_pipeline "
+                f"model={task_params.model} removed_entries={removed}"
+            )
+            self._pipeline_prefix_cache_cleared = True
+        return False
 
     @property
     def has_work(self) -> bool:
@@ -241,15 +275,15 @@ class ExoBatchGenerator:
         validate_generation_context(validation_task, len(all_prompt_tokens))
 
         is_bench = task_params.bench
+        allow_prefix_cache = self._allow_prefix_cache(task_params, is_bench)
 
         prefix_hit_length = 0
         matched_index: int | None = None
         is_exact_hit = False
         prompt_tokens = all_prompt_tokens
 
-        if self.kv_prefix_cache is not None and (
-            not is_bench or task_params.use_prefix_cache
-        ):
+        if allow_prefix_cache:
+            assert self.kv_prefix_cache is not None
             cache, remaining_tokens, matched_index, is_exact_hit = (
                 self.kv_prefix_cache.get_kv_cache(
                     self.model,
@@ -403,7 +437,7 @@ class ExoBatchGenerator:
                 c.values = c._trim(trim_size, c.values)
                 c._idx = c.max_size
 
-        if use_legacy_prefill and (not is_bench or task_params.use_prefix_cache):
+        if use_legacy_prefill and allow_prefix_cache:
             min_prefix_hit_length = max(
                 1000, system_prompt_token_count(task_params, self.tokenizer)
             )
@@ -481,6 +515,7 @@ class ExoBatchGenerator:
             uncached_prompt_tokens=len(prompt_tokens),
             cache_snapshots=cache_snapshots,
             prefix_cache_saved=use_legacy_prefill,
+            allow_prefix_cache=allow_prefix_cache,
         )
 
         return uid
@@ -514,10 +549,10 @@ class ExoBatchGenerator:
             prefix_cache_hit=state.prefix_cache_hit,
         )
 
-        if not state.task_params.bench or state.task_params.use_prefix_cache:
+        if state.allow_prefix_cache:
             extracted = self._mlx_gen.extract_cache([uid]).get(uid)
             if extracted is not None:
-                cache, _tokens = extracted
+                cache = cast(KVCacheType, extracted[0])
                 min_prefix_hit_length = max(
                     1000,
                     system_prompt_token_count(state.task_params, self.tokenizer),
