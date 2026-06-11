@@ -1,3 +1,4 @@
+import os
 import queue
 import threading
 import time
@@ -62,6 +63,9 @@ from exo.worker.runner.bootstrap import logger
 
 PREFILL_PICKUP_TIMEOUT_SECONDS = 3
 PREFILL_FINISH_TIMEOUT_SECONDS = 300
+GENERATION_STEP_SLOW_LOG_SECONDS = float(
+    os.environ.get("EXO_GENERATION_STEP_SLOW_LOG_SECONDS", "5")
+)
 
 
 @dataclass
@@ -393,7 +397,29 @@ class Runner:
             if return_code := self._drain_generation_work_queue():
                 return return_code
 
-            results = self.generator.step()
+            step_started_at = time.perf_counter()
+            logger.debug(
+                "runner_step_start "
+                f"model={self.model_id} rank={self.device_rank} "
+                f"active_tasks={len(self.active_tasks)}"
+            )
+            results = list(self.generator.step())
+            step_elapsed = time.perf_counter() - step_started_at
+            if step_elapsed >= GENERATION_STEP_SLOW_LOG_SECONDS:
+                logger.warning(
+                    "runner_step_slow "
+                    f"model={self.model_id} rank={self.device_rank} "
+                    f"elapsed={step_elapsed:.2f}s "
+                    f"active_tasks={len(self.active_tasks)} "
+                    f"results={len(results)}"
+                )
+            else:
+                logger.debug(
+                    "runner_step_done "
+                    f"model={self.model_id} rank={self.device_rank} "
+                    f"elapsed={step_elapsed:.2f}s "
+                    f"results={len(results)}"
+                )
 
             finished: list[TaskId] = []
             for task_id, result in results:

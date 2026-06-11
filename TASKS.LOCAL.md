@@ -119,6 +119,12 @@ Hoje o comportamento ruim observado e:
     - runner loga `runner_generation_start` em cada rank que recebeu a task;
     - script `scripts/test_two_user_concurrency.py` agora envia `user` diferente
       para A/B e informa `closed` quando o stream fecha sem `[DONE]`.
+    - reforco posterior:
+      - prefill emite progresso inicial `0/N` antes de barreira distribuida ou
+        primeiro forward MLX;
+      - runner loga `runner_step_start`, `runner_step_done` e
+        `runner_step_slow` por rank para diagnosticar BF16 preso em
+        sincronizacao, JIT ou forward.
 
 - [x] Reservar memoria dinamica antes de distribuir camadas em pipeline.
   - Feito:

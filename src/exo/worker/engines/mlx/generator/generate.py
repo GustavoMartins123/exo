@@ -316,34 +316,43 @@ def prefill(
     snapshots: list[CacheSnapshot] = []
 
     # TODO(evan): kill the callbacks/runner refactor
-    def progress_callback(processed: int, total: int) -> None:
+    def emit_prefill_progress(processed: int, total: int) -> None:
         elapsed = time.perf_counter() - start_time
         tok_per_sec = processed / elapsed if elapsed > 0 else 0
         logger.debug(
             f"Prefill progress: {processed}/{total} tokens ({tok_per_sec:.1f} tok/s)"
         )
-        if has_ssm:
-            snapshots.append(snapshot_ssm_states(cache))
-
         if on_prefill_progress is not None:
             on_prefill_progress(processed, total)
+
+    def progress_callback(processed: int, total: int) -> None:
+        if has_ssm:
+            snapshots.append(snapshot_ssm_states(cache))
+        emit_prefill_progress(processed, total)
 
     def combined_progress_callback(processed: int, total: int) -> None:
         if distributed_prompt_progress_callback is not None:
             distributed_prompt_progress_callback()
         progress_callback(processed, total)
 
+    is_pipeline = _has_pipeline_communication_layer(model)
+
+    prefill_step_size = 4096
+    uses_pipeline_prefill = is_pipeline and num_tokens >= prefill_step_size
+    if not uses_pipeline_prefill:
+        # Emit an initial progress event before any distributed barrier or MLX
+        # forward. Large BF16 models can spend a long time compiling, waiting
+        # on pipeline IO, or synchronising before stream_generate calls its own
+        # progress callback.
+        emit_prefill_progress(0, num_tokens)
+
     set_pipeline_prefill(model, is_prefill=True)
 
     mx_barrier(group)
     logger.info("Starting prefill")
 
-    is_pipeline = _has_pipeline_communication_layer(model)
-
-    prefill_step_size = 4096
-
     try:
-        if is_pipeline and num_tokens >= prefill_step_size:
+        if uses_pipeline_prefill:
             set_pipeline_queue_sends(model, queue_sends=True)
             assert group is not None, "Pipeline prefill requires a distributed group"
             pipeline_parallel_prefill(
