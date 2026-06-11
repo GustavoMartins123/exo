@@ -12,6 +12,7 @@ from exo.master.placement_utils import (
 from exo.master.tests.conftest import (
     create_node_accelerator_memory,
     create_node_accelerator_memory_bytes,
+    create_node_accelerator_memory_total_available,
     create_node_memory,
     create_socket_connection,
 )
@@ -406,6 +407,63 @@ def test_large_pipeline_shards_reserve_memory_before_assigning_layers():
         )
 
     assert layers_by_node[node_a5000] > layers_by_node[node_3060_a]
+    assert layers_by_node[node_mac] > layers_by_node[node_a5000]
+    assert sum(layers_by_node.values()) == model_card.n_layers
+
+
+def test_bf16_pipeline_reserve_keeps_mid_size_gpu_useful():
+    """A huge BF16 model should not collapse every non-Mac node to the floor.
+
+    This mirrors the observed Qwen 27B BF16 placement after other memory is
+    already resident: two 3060s have little free VRAM, the A5000 has enough free
+    VRAM to help, and the Mac still has the largest unified-memory budget.
+    """
+    node_mac = NodeId()
+    node_3060_a = NodeId()
+    node_3060_b = NodeId()
+    node_a5000 = NodeId()
+    cycle = Cycle(node_ids=[node_mac, node_3060_a, node_3060_b, node_a5000])
+    node_memory = {
+        node_mac: create_node_accelerator_memory_total_available(
+            total=Memory.from_gb(96),
+            available=Memory.from_gb(47.09),
+            kind="apple_unified",
+        ),
+        node_3060_a: create_node_accelerator_memory_total_available(
+            total=Memory.from_gb(12),
+            available=Memory.from_gb(5.78),
+        ),
+        node_3060_b: create_node_accelerator_memory_total_available(
+            total=Memory.from_gb(12),
+            available=Memory.from_gb(5.79),
+        ),
+        node_a5000: create_node_accelerator_memory_total_available(
+            total=Memory.from_gb(24),
+            available=Memory.from_gb(17.73),
+        ),
+    }
+    model_card = ModelCard(
+        model_id=ModelId("test-bf16-large-model"),
+        n_layers=64,
+        storage_size=Memory.from_gb(51),
+        hidden_size=1000,
+        supports_tensor=True,
+        tasks=[ModelTask.TextGeneration],
+        backends=[Backend.MlxMetal],
+    )
+
+    assignments = get_shard_assignments(
+        model_card, cycle, Sharding.Pipeline, node_memory=node_memory
+    )
+
+    layers_by_node: dict[NodeId, int] = {}
+    for node_id, runner_id in assignments.node_to_runner.items():
+        shard = assignments.runner_to_shard[runner_id]
+        layers_by_node[node_id] = shard.end_layer - shard.start_layer
+
+    largest_3060_share = max(layers_by_node[node_3060_a], layers_by_node[node_3060_b])
+    assert largest_3060_share <= 2
+    assert layers_by_node[node_a5000] >= largest_3060_share * 4
     assert layers_by_node[node_mac] > layers_by_node[node_a5000]
     assert sum(layers_by_node.values()) == model_card.n_layers
 

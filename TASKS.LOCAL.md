@@ -132,6 +132,10 @@ Hoje o comportamento ruim observado e:
       livre a uma fracao minima de camadas, deixando o grosso no Mac/A5000;
     - teste cobre memoria parecida com o cluster real: 8.65GB, 8.85GB, 19.38GB
       e 74.19GB disponiveis.
+    - reforco posterior: para modelos BF16 muito grandes, a reserva agora tem
+      teto por classe de dispositivo. Isso evita zerar o budget da A5000 e
+      manter ela no mesmo piso das 3060; o log `placement_pipeline` tambem
+      mostra `layer_budget` depois da reserva.
 
 - [x] Corrigir warmup de shards hibridos com `ArraysCache`.
   - Feito:

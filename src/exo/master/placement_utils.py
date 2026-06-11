@@ -27,6 +27,21 @@ _PIPELINE_MIN_STATIC_RESERVE = Memory.from_gb(
 _PIPELINE_STATIC_RESERVE_RATIO = float(
     os.environ.get("EXO_PIPELINE_STATIC_RESERVE_RATIO", "0.45")
 )
+_PIPELINE_SMALL_DEVICE_THRESHOLD = Memory.from_gb(
+    float(os.environ.get("EXO_PIPELINE_SMALL_DEVICE_THRESHOLD_GB", "16"))
+)
+_PIPELINE_MID_DEVICE_THRESHOLD = Memory.from_gb(
+    float(os.environ.get("EXO_PIPELINE_MID_DEVICE_THRESHOLD_GB", "32"))
+)
+_PIPELINE_SMALL_DEVICE_RESERVE_CAP_RATIO = float(
+    os.environ.get("EXO_PIPELINE_SMALL_DEVICE_RESERVE_CAP_RATIO", "0.90")
+)
+_PIPELINE_MID_DEVICE_RESERVE_CAP_RATIO = float(
+    os.environ.get("EXO_PIPELINE_MID_DEVICE_RESERVE_CAP_RATIO", "0.55")
+)
+_PIPELINE_LARGE_DEVICE_RESERVE_CAP_RATIO = float(
+    os.environ.get("EXO_PIPELINE_LARGE_DEVICE_RESERVE_CAP_RATIO", "0.40")
+)
 
 
 def filter_cycles_by_memory(
@@ -48,28 +63,56 @@ def filter_cycles_by_memory(
     return filtered_cycles
 
 
-def _pipeline_static_reserve(model_card: ModelCard) -> Memory:
+def _pipeline_device_size(memory_usage: MemoryUsage) -> Memory:
+    accelerator_total = sum(
+        (device.total for device in memory_usage.accelerators),
+        start=Memory(),
+    )
+    if accelerator_total.in_bytes > 0:
+        return accelerator_total
+    return memory_usage.ram_total
+
+
+def _pipeline_reserve_cap_ratio(memory_usage: MemoryUsage) -> float:
+    device_size = _pipeline_device_size(memory_usage)
+    if device_size <= _PIPELINE_SMALL_DEVICE_THRESHOLD:
+        return _PIPELINE_SMALL_DEVICE_RESERVE_CAP_RATIO
+    if device_size <= _PIPELINE_MID_DEVICE_THRESHOLD:
+        return _PIPELINE_MID_DEVICE_RESERVE_CAP_RATIO
+    return _PIPELINE_LARGE_DEVICE_RESERVE_CAP_RATIO
+
+
+def get_pipeline_static_reserve(
+    model_card: ModelCard, memory_usage: MemoryUsage
+) -> Memory:
     if model_card.storage_size < _PIPELINE_RESERVE_MIN_MODEL_SIZE:
         return Memory()
     model_scaled_reserve = model_card.storage_size * _PIPELINE_STATIC_RESERVE_RATIO
-    return max(model_scaled_reserve, _PIPELINE_MIN_STATIC_RESERVE)
+    desired_reserve = max(model_scaled_reserve, _PIPELINE_MIN_STATIC_RESERVE)
+    available = memory_usage.inference_available
+    reserve_cap = available * _pipeline_reserve_cap_ratio(memory_usage)
+    return min(desired_reserve, reserve_cap)
 
 
-def _pipeline_layer_memory_budget(
+def get_pipeline_layer_memory_budget(
     node_id: NodeId,
     node_memory: Mapping[NodeId, MemoryUsage],
     model_card: ModelCard,
 ) -> Memory:
     """Memory used as the *proportional allocation hint* for a node.
 
-    The static reserve nudges layers off small GPUs toward big ones, but it
-    must not zero out a node's budget — `allocate_layers_proportionally` floors
-    every node at one layer, and a 0-byte budget would later trip the
-    downstream validator, fail the whole placement and leave the master in a
-    retry loop (the regression we are fixing). Always keep at least one
-    layer's worth, capped by what the node actually has."""
-    available = node_memory[node_id].inference_available
-    reserve = _pipeline_static_reserve(model_card)
+    The static reserve nudges layers off small GPUs toward big ones. It is
+    capped by device class so very large BF16 models do not zero out mid-size
+    GPUs such as a 24 GB A5000 while still keeping 12 GB cards conservative.
+
+    The budget must not become 0 — `allocate_layers_proportionally` floors every
+    node at one layer, and a 0-byte budget would later trip the downstream
+    validator, fail the whole placement and leave the master in a retry loop.
+    Always keep at least one layer's worth, capped by what the node actually
+    has."""
+    memory_usage = node_memory[node_id]
+    available = memory_usage.inference_available
+    reserve = get_pipeline_static_reserve(model_card, memory_usage)
     after_reserve = Memory.from_bytes(max(0, available.in_bytes - reserve.in_bytes))
     one_layer = model_card.storage_size // model_card.n_layers
     floor = min(available, one_layer)
@@ -126,7 +169,7 @@ def _compute_total_memory(
 ) -> Memory:
     total_memory = sum(
         (
-            _pipeline_layer_memory_budget(node_id, node_memory, model_card)
+            get_pipeline_layer_memory_budget(node_id, node_memory, model_card)
             for node_id in node_ids
         ),
         start=Memory(),
@@ -175,7 +218,7 @@ def _allocate_and_validate_layers(
     layer_allocations = allocate_layers_proportionally(
         total_layers=model_card.n_layers,
         memory_fractions=[
-            _pipeline_layer_memory_budget(node_id, node_memory, model_card)
+            get_pipeline_layer_memory_budget(node_id, node_memory, model_card)
             / total_memory
             for node_id in node_ids
         ],

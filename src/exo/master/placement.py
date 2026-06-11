@@ -10,6 +10,7 @@ from exo.master.placement_utils import (
     get_mlx_jaccl_coordinators,
     get_mlx_jaccl_devices_matrix,
     get_mlx_ring_hosts_by_node,
+    get_pipeline_layer_memory_budget,
     get_shard_assignments,
     get_smallest_cycles,
     orient_cycle_for_pipeline_memory,
@@ -125,15 +126,21 @@ def _log_pipeline_placement(
             else "n/a"
         )
         memory = node_memory[node_id].inference_available
+        layer_budget = get_pipeline_layer_memory_budget(
+            node_id=node_id,
+            node_memory=node_memory,
+            model_card=command.model_card,
+        )
         parts.append(
             "rank={rank} node={node} layers={layers} range={start}:{end} "
-            "inference_available={memory:.2f}GB".format(
+            "inference_available={memory:.2f}GB layer_budget={budget:.2f}GB".format(
                 rank=getattr(shard, "device_rank", "n/a"),
                 node=node_id,
                 layers=layer_count,
                 start=start_layer,
                 end=end_layer,
                 memory=memory.in_gb,
+                budget=layer_budget.in_gb,
             )
         )
 

@@ -63,6 +63,28 @@ def create_node_accelerator_memory_bytes(
     )
 
 
+def create_node_accelerator_memory_total_available(
+    *,
+    total: Memory,
+    available: Memory,
+    kind: MemoryDeviceKind = "cuda_vram",
+) -> MemoryUsage:
+    return MemoryUsage.from_bytes(
+        ram_total=1000,
+        ram_available=1000,
+        swap_total=1000,
+        swap_available=1000,
+        accelerators=(
+            MemoryDeviceUsage.from_bytes(
+                name="test accelerator",
+                kind=kind,
+                total=total.in_bytes,
+                available=available.in_bytes,
+            ),
+        ),
+    )
+
+
 def create_node_network() -> NodeNetworkInfo:
     return NodeNetworkInfo(
         interfaces=[
